@@ -1,158 +1,40 @@
-# Ordinary PS/2 input microtests
+# PS/2 8042 Keyboard, Mouse & Live-Input Verification (`verif/ps2_ui/`)
 
-These sources preserve the byte-exact October 2 isolated UI-input qualification.
-They are not connected to the canonical full-PC host, do not modify production
-RTL, and do not establish Windows UI acceptance.
+`verif/ps2_ui/` contains host and RTL verification harnesses for the PC/AT `8042` PS/2 keyboard/mouse controller (`3rd-party/ao486_MiSTer/rtl/soc/ps2.v`, `simple_fifo.v`, `iobus.v`), the FPGA PS/2 device/mailbox injectors (`ven_ps2_device.sv`), and the full-PC live keyboard FIFO adapter.
 
-New investigation: [latched AUX byte ownership](AUX_STATUS.md), a separate
-one-line status repair and actual-iobus mixed keyboard/mouse microgate. Its
-qualification status is tracked separately from the October 2 loss witnesses.
+## Physical Hardware Status (`c0e3fe43` on `main`, 2026-11-14)
 
-October 16 follow-up: [current-AUX keyboard ownership backport](LOSS_AUX_IOBUS.md)
-combines the retained loss/resync proposal with the newer AUX repair. Sixteen
-actual-iobus cases pass and sixteen old-controller loss witnesses reproduce.
-It is a separate private candidate, not part of the running FPGA synthesis;
-the live-input adapter below must not be assumed compatible with its new
-retained-producer protocol.
+On the board-qualified **RK-XCZU15EG-F** release image **`c0e3fe43`** (`40.264133 MHz` post-route STA sign-off, **`0.515778001` total U+V / `0.397847833` primary/U** verified Quake gameplay IPC across cycles `28,696,827,616–32,989,404,795`), the PC/AT PS/2 keyboard & mouse controller and hardware injection mailboxes pass **cold Windows 95 OSR2 GUI boot, interactive multi-application mouse & keyboard session (Calculator `355/113`, Notepad, MS Paint), and clean OS shutdown**, as well as `make bus`'s integrated `verif/bus/run-ps2-iobus-gate.sh` delayed-read regression.
 
-## October 16: current-model live keyboard adapter (not UI acceptance)
+## Harnesses & Verified Controller Properties
 
-`prepare_pc_live_input.py` now prepares a **host-only** derivative of the frozen
-V-result full-PC host (`v-result-carry-soc-r1`, model `b6b92dbf…`). It does not
-edit that model, the checkout's dirty `sim_ven.cpp`, RTL, defines, the running
-synthesis inputs, guest software or snapshots. The prepared main has a unique
-basename to avoid accidental VPATH object reuse. This original host-only variant
-was not linked; the separate retained-controller variant's actual build and
-integration status are tracked below.
+| Test / Script | Instantiated Scope | Verified Contract |
+| --- | --- | --- |
+| `test_ui_input_host.cpp` | Pure C++17 host unit test (`UI-HOST-MICRO-OK`) | LF-framed `--ui-fifo` command parsing, scancode/parity framing, monotonic command IDs, retained-byte tracking, and exclusive raw frame-capture finalization. |
+| `ui_ps2_probe.sv` + `test_ui_ps2.cpp` | `ps2.v` + `simple_fifo.v` (`+VEN_KBC_FAST +VEN_KBD_AUTOACK`) | Translated/raw scan streams across wire half-periods `32/64/1875/2917`, break-prefix ownership, and baseline controller loss witnesses (`UI-PS2-MICRO-OK`). |
+| `run_aux_status.py` (`tb_ps2_aux_status.sv`, `test_aux_status.py`) | `iobus.v` + `ps2.v` + `simple_fifo.v` (496 stimuli × 4 `KBC_FAST`/`AUTOACK` profiles) | **Latched `AUX` status ownership:** port `0x64` bit 5 (`AUX`) must follow the latched selected output byte (`status_mousebufferfull`) rather than `!mouse_fifo_empty`, preventing a newly queued mouse byte from misrouting an already-latched keyboard byte on port `0x60`. |
+| `tb_loss_aux_iobus.sv` / `run_loss_aux_extended.py` (`proposals/`) | `iobus.v` + `ps2.v` + `simple_fifo.v` | Skid-register scan retention, `scan > ACK > reply` arbitration, 64-byte full-FIFO `IBF` backpressure (mouse reads never grant keyboard FIFO credit), and single-strobe held I/O writes. |
+| `tb_hosted_resync.sv` / `run_hosted_keyboard_transport.py` | `ven_ps2_device.sv` ↔ `ps2.v` wired-AND pins (`3.125 MHz` & `40 MHz` profiles) | Mid-frame controller reset / `0xAA` self-test 8,192-clock inhibit resynchronization (`tx_aborted` retry across all 9 frame phases) and physical host-to-keyboard serial command/ACK transmission (`AUTOACK=0`). |
+| `prepare_pc_live_input.py` / `run_retained_pc_input.py` (`pc_input_probe.S`) | Cold-boot BIOS/PM32 guest + full-PC `ao486-sim` PS/2 pins | End-to-end 1,667-clock half-period (`40 MHz`) external PS/2 wire delivery of `Ctrl+Esc` and `Enter` in both translated and raw modes with active `U/V + fast-pipe` pairing. |
 
-The optional `--ui-fifo /absolute/private-directory/input.fifo` endpoint reuses
-the previously tested LF-framed commands: `1 key ctrl+esc`, `2 key enter`,
-`3 capture`. The directory must already be owned mode 0700; the FIFO is owned
-mode 0600. IDs increase monotonically. Legacy `--kb*`, save/restore/snapshot
-and debugger-breakpoint options are rejected when live input is enabled.
-Keyboard transport runs at ordinary PS/2 timing derived from the configured
-clock (half-period 1,667 core clocks at 40 MHz), not the legacy 24-clock sender.
+## Running Standalone Microgates Safely
 
-`pc_keyboard_input.h` drives only the external keyboard pins. It observes
-the real 8042/FIFO before and after **every** ordinary clock edge, including
-PS-service ticks, without adding evaluations or clocks. AUTOACK/reply
-arbitration, actual FIFO write-index movement, stored bytes, reset and break-
-prefix ownership are checked. Optimized-away timeout/data expressions are
-reconstructed from the exact pinned controller expressions; acceptance also
-requires independent post-edge FIFO evidence. Input loss is an error, not
-silent acceptance or speculative retry. FIFO delivery is **not** UI success.
-
-Capture uses the original raw pixel conversion unchanged. It checks buffered
-write/final-close failures, creates command captures exclusively, and caps
-them at 64. It neither changes colors nor overwrites earlier captures. A
-completed raw file is not evidence that the guest responded to an input.
-
-Actual limited checks on October 16:
-
-- Five Python source-integration tests pass, including exact input hashes,
-  unchanged pixel loops/evaluation counts and rejection of changed anchors.
-- The native binding unit test passes 32,768 mux cases and nine negative
-  controls. Its observations are synthetic **host tests, not RTL execution**.
-- The existing native protocol/endpoint tests print `UI-HOST-MICRO-OK`.
-- The entire generated main passes C++ syntax checking against the actual
-  current model's generated headers, including its hierarchy bindings.
-
-Evidence preparation: `external/tmp/ventium-fprem-sequence.iSZ9BAj4/pc-live-input-host-r1/`.
-Generated main SHA-256:
-`96f237afb4b51a19a7cc28f78132e9d12af72d924d6ff6eb19bfbdb185879db2`.
-Successful bounded host-check owner:
-`ventium-pc-live-input-host-oct16-r3`, invocation
-`a213959852aa4b5ea40251422e9a5ddf`, native exit 0, 00:17:46–00:17:50 UTC,
-184,983,552-byte memory peak, zero swap, actual child affinity CPUs 12–13.
-The shell's ordered `-e` command chain includes both compilations/executions
-and the final syntax check. Results were observed in the tool transcript;
-this small check did not create a separate native log file. R1 and R2 failed
-before compilation (systemd dollar expansion, then an absent user-manager
-`rg` PATH entry); they are not passes. The successful exited unit was then
-stopped to release its waiting `systemd-run --wait` client, not to kill a test.
-
-Remaining: real-controller adapter integration tests, a private full-PC link,
-UI-disabled architectural/cycle comparison, cold boot with the endpoint,
-keyboard-driven visible UI changes, and general mouse motion/button input.
-The inherited `--mouse` device remains unchanged and is **not** qualified by
-these keyboard checks. Do not launch another long Win95 run or count this as
-standard-suite/physical-FPGA acceptance until the input path is qualified.
-
-The retained-controller adapter now has native controller microtests and a
-successfully linked private whole-PC model. Its two cold keyboard probes pass
-with exact guest reads and actual V retirements; an independent audit rechecks
-19,475 source pins and native closure. The pinned QEMU positive/negative controls
-also pass. See [current integration evidence](LOSS_AUX_IOBUS.md#cold-whole-pc-integration-probe),
-including the preserved failed link and its one-wire binding correction.
-
-No IPC gain is claimed. The current candidates are gameplay-unmeasured; the
-latest verified older baseline is **0.48146083 total U+V** on model `7e877b3b…`,
-cycles **1,100,065,247–1,200,065,247**. This does not establish timedemo completion.
-
-The pure-host test checks bounded command parsing, scancodes/parity, endpoint
-identity, byte/prefix ownership and checked raw-capture finalization. The narrow
-RTL test instantiates unchanged production `ps2.v` and `simple_fifo.v` with
-`VEN_KBC_FAST` and `VEN_KBD_AUTOACK`. It uses ordinary PS/2 pins and CPU I/O only:
-no forced/deposited registers or seeded FIFO memory.
-
-A successful narrow test deliberately reproduces existing controller failures:
-AUTOACK overwriting a simultaneous scan, full-FIFO scan/ACK loss and natural
-host-command timeout losing a break prefix. Its final marker
-`UI-PS2-MICRO-OK controller_bug_witnesses_expected=1 rtl_unchanged=1` means the
-test specification held, **not** that those controller bugs are fixed. The
-diagnostic sender must refuse false acceptance; it never speculatively replays.
-
-## Bounded reproduction
-
-For new runs, use an owned scratch directory under `/home/yukidama/external/tmp`
-and set `TMPDIR` there explicitly, as required by the current `AGENTS.md`.
-Check that the external filesystem is mounted, writable and has enough free
-space. Do not fall back to the root filesystem. Historical paths below are
-retained evidence locations, not instructions to create new `/var/tmp` runs.
-Apply owner limits of 2 GiB memory, swap disabled, 64 tasks and two free CPUs,
-excluding any running gameplay CPU. Cap each compile/test phase below 590 seconds;
-stop on an actual resource failure instead of automatically retrying.
-
-The actual qualified toolchain was Verilator 5.046 and g++ 15.2. The commands below
-are build inputs, to run inside those resource/time limits; no complete PC model
-or Vivado job is needed. Set `PS2_TEST_DIR`, `PS2_REPO_DIR` and `PS2_RUN_DIR` to
-the absolute source/repository/owned scratch paths.
+Always use an owned scratch directory under `/home/yukidama/external/tmp` (`TMPDIR`) and `/tools/verilator/v5.046/bin/verilator` inside `tools/build_scope.sh`, keeping all six structural lint classes fatal:
 
 ```sh
+export TMPDIR=/home/yukidama/external/tmp
+export PYTHONDONTWRITEBYTECODE=1
+PS2_RUN_DIR=$(mktemp -d "$TMPDIR/ventium-ps2-micro.XXXXXX")
+
+# 1. Host protocol & binding checks:
 g++ -std=c++17 -O2 -Wall -Wextra -pedantic \
-  "$PS2_TEST_DIR/test_ui_input_host.cpp" -o "$PS2_RUN_DIR/ui_host_micro"
+  verif/ps2_ui/test_ui_input_host.cpp -o "$PS2_RUN_DIR/ui_host_micro"
 "$PS2_RUN_DIR/ui_host_micro" "$PS2_RUN_DIR"
+python3 -B -m unittest discover -s verif/ps2_ui -p 'test_*.py'
 
-verilator --cc --exe --build -j 2 --assert --top-module ui_ps2_probe \
-  --Mdir "$PS2_RUN_DIR/obj_ps2" -o ui_ps2_micro -Wall -Wno-UNUSED -Wno-fatal \
-  -Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN -Werror-MULTIDRIVEN \
-  -Werror-LATCH -Werror-UNOPTFLAT +define+VEN_KBC_FAST +define+VEN_KBD_AUTOACK \
-  -CFLAGS "-O2 -std=c++17 -I$PS2_TEST_DIR" \
-  "$PS2_REPO_DIR/3rd-party/ao486_MiSTer/rtl/soc/ps2.v" \
-  "$PS2_REPO_DIR/3rd-party/ao486_MiSTer/rtl/common/simple_fifo.v" \
-  "$PS2_TEST_DIR/ui_ps2_probe.sv" "$PS2_TEST_DIR/test_ui_ps2.cpp"
-"$PS2_RUN_DIR/obj_ps2/ui_ps2_micro"
+# 2. Latched AUX-status 4-profile iobus gate:
+VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator \
+VENTIUM_BUILD_SCOPE_PROFILE=default \
+  tools/build_scope.sh -- python3 -B verif/ps2_ui/run_aux_status.py \
+  --out "$PS2_RUN_DIR/aux-status"
 ```
-
-Production width/style/declaration-initializer warnings remain visible. The six
-structural warning classes above remain hard errors.
-
-## Actual retained qualification (not a proposed result)
-
-Owned leaf: `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/ui-input-host`.
-
-- `qualified-host.wux0xra0`: compiler/native/pin waits 0; wrapper 0;
-  `UI-HOST-MICRO-OK`. Peak 138,256,384 bytes, all OOM counters zero.
-- `qualified-ps2.bdch8m4u`: compiler/native/pin waits 0; wrapper 0; ordinary
-  translated streams pass at half-periods 32/64/1875/2917, plus raw and normal
-  break-prefix controls. Peak 541,044,736 bytes, all OOM counters zero.
-  Closed native log SHA256
-  `c90d3becdfdd3946cd916a5d1f940234ba615f1479396406d8a4c239e4c8c5f0`.
-- Before/after manifests held all 83 original and 11 isolated source pins.
-  These hashes are observations, not atomic loaded-source ancestry.
-
-The separate host-only diagnostic executable was relinked from one isolated
-main and the frozen 5c RTL archive/eight non-main objects; it has a new native
-identity and cannot inherit the accepted Win95 desktop PASS. Gameplay IPC remains
-unmeasured for 5c2491; verified baseline 0.43038841 belongs to older 4092c92a,
-clocks 2,199,999,637–2,299,999,637.

@@ -13,9 +13,9 @@ project = "Ventium"
 author = "The Ventium Project"
 copyright = "2026, The Ventium Project"
 
-# The Ventium replica targets the P5/P54C (i586) generation.
-version = "0.1"
-release = "0.1"
+# Board-qualified RK-XCZU15EG-F public FPGA source release (c0e3fe43).
+version = "0.2.0"
+release = "0.2.0-c0e3fe43"
 
 # -- General configuration ---------------------------------------------------
 
@@ -39,15 +39,25 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**/*.dot"]
 html_theme = "alabaster"
 
 # A short, descriptive title shown in the browser tab / sidebar.
-html_title = "Ventium — P5/P54C Replica Reference"
+html_title = "Ventium — P5/P54C Replica Reference (v0.2.0-c0e3fe43)"
 
 # Project logo, shown atop the alabaster sidebar. Path is relative to this
 # configuration directory (docs/sphinx/), pointing at the single source of truth
 # docs/ventium.png; Sphinx copies it into the output _static/ on build.
 html_logo = "../ventium.png"
 
-# alabaster: keep the project name visible beneath the logo (logo_name) rather
-# than letting the image replace the title text entirely.
+# alabaster: surface official GitHub repository & releases prominently in the
+# sidebar and top banner without requiring third-party iframe buttons.
 html_theme_options = {
     "logo_name": True,
+    "description": "Synthesizable SystemVerilog Pentium P5/P54C Reconstruction",
+    "github_user": "AL-255",
+    "github_repo": "ventium",
+    "github_banner": True,
+    "github_button": False,
+    "extra_nav_links": {
+        "GitHub Source (AL-255/ventium)": "https://github.com/AL-255/ventium",
+        "Official Releases (v0.2.0-c0e3fe43)": "https://github.com/AL-255/ventium/releases",
+        "FPGA Build & Run Guide": "https://github.com/AL-255/ventium/blob/main/HOW_TO_RUN_FPGA.md",
+    },
 }

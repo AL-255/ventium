@@ -1,85 +1,33 @@
-# AXI/VGA read-lane qualification
+# AXI-to-Avalon Byte-Exact VGA Read-Lane Gates (`verif/axivgalanes/`)
 
-This standalone test instantiates production `ven_axi2avalon.sv` and actual
-ao486 `l2_cache.v`, with the VGA aperture enabled. It verifies accepted read
-byte enables and actual VGA byte-read strobes under every preceding write
-mask, all four byte lanes, aligned halfword/dword reads, and unaligned logical
-MMIO spans decomposed into legal byte-exact pieces. Its endpoint records the
-last enabled read address (architectural latch ownership); it does not claim
-to implement VGA plane memory, write modes, scanout, or a Windows reference.
+`verif/axivgalanes/` verifies Ventium's non-cacheable MMIO byte-exactness invariant (`AGENTS.md`: *"Non-cacheable accesses are byte-exact; AXI models must honor ARSIZE/lane semantics rather than silently widening reads"*) across the production `ao486-sim/ven/ven_axi2avalon.sv` bridge, `ao486` `l2_cache.v`, and `vga.v` planar memory.
 
-The native test fails on any mismatch. An expected red result is not a PASS.
-The runner preserves both ordinary and deployed bridge/VGA-feature results,
-input hashes, native exit status, and actual bounded resource receipts.
-It never edits RTL, builds a processor, boots a guest, or accesses guest disks.
-PINMISSING remains a hard error for new testbench and bridge ports. The
-existing `romwrite_ao486_primitive.vlt` waiver applies only to the platform's
-three primitive instances at `l2_cache.v:950-1060`.
+## 1. Read-Lane & Latch Ownership Gate (`run-gate.sh`)
 
-After checking disk space, create a fresh owned directory under `verif/l1`
-named `obj_dir_axivgalanes_*`, then run:
+`tb_axivgalanes.sv` (and `tb_axivgalanes_hold.sv` under `AXIVGALANES_HOLD=1`) instantiates `ven_axi2avalon.sv` + `l2_cache.v` with the VGA MMIO aperture (`0xA0000–0xBFFFF`) enabled:
+
+- Sweeps **192 legal narrow read transactions** per profile across all 16 preceding `WSTRB` masks, all 4 byte lanes (`ARSIZE=0`), aligned halfwords (`ARSIZE=1`), dwords (`ARSIZE=2`), and unaligned spans decomposed into byte-exact pieces.
+- Verifies exact accepted read byte enables and VGA read-latch address ownership (`AXIVGALANES_BRIDGE_ASSERT=1` enables the bridge's legal-shape assertions; `AXIVGALANES_HOLD=1` mutates `AR*`/idle `WSTRB` immediately after `ARREADY` across 4 Avalon wait cycles).
+- `PINMISSING` and the structural lint classes remain hard errors (the narrow `romwrite_ao486_primitive.vlt` waiver covers only the three vendor primitives in `l2_cache.v:950-1060`).
 
 ```sh
-bash verif/axivgalanes/run-gate.sh --out /absolute/path/to/that/directory
+export TMPDIR=/home/yukidama/external/tmp
+out_dir=$(mktemp -d "$TMPDIR/obj_dir_axivgalanes_XXXXXX")
+AXIVGALANES_BRIDGE_ASSERT=1 bash verif/axivgalanes/run-gate.sh --out "$out_dir"
 ```
 
-For the post-repair positive run, use another fresh output directory and
-set `AXIVGALANES_BRIDGE_ASSERT=1`. The same 192 legal read pieces run in
-each profile; the production bridge's legal-shape assertions are then enabled.
-The pre-repair run leaves that define off because the existing assertion
-rejects legal narrow reads before their strobes can be observed.
+## 2. Planar VGA Storage & Mode-0/Mode-1 Latch Gate (`run-planar-gate.sh`)
 
-`AXIVGALANES_HOLD=1` selects the separate `tb_axivgalanes_hold.sv` variant.
-It changes AR address/size/length/burst/ID and idle WSTRB immediately after
-each accepted AR, forces four Avalon wait cycles, and checks the captured
-owner's address, read mask, response ID and downstream read side effects.
-The original red/green test source is retained unchanged.
+`tb_axivgalanes_planar.sv` adds production `vga.v` and its 4 simulated plane RAMs, driving all initialization and checks strictly through AXI transactions and VGA I/O registers (no hierarchical RAM pokes or forced signals):
 
-Existing WRAP coverage can be extended in `ao486-sim/ven/tb_axi2avalon.sv`
-and `verif/l1/run-axi2avalon-wrap-gate.sh`; the original four-byte responder
-does not establish byte-exact VGA read side effects. This independent test
-does not modify that potentially user-owned work.
-
-## Actual VGA planar storage regression
-
-`tb_axivgalanes_planar.sv` additionally instantiates the production `vga.v`
-and its real simulated plane RAMs. All plane/address initialization uses
-ordinary AXI writes and VGA register I/O; there are no forced signals or
-hierarchical RAM pokes. Distinct source bytes and an independent latch prime
-make a missing or extra read observable in the subsequent stored bytes.
-
-Each profile tests all16 preceding WSTRB values against four byte lanes, two
-aligned halfwords and a dword:112 cases. For each case it checks source RDATA,
-then both a mode0 masked write and a mode1 latch copy in allfour planes.
-There are896 actual stored-plane checks and208 addressed source-byte checks,
-including initialization readback. Requests and I/O changes wait for backend
-completion, not merely an early AXI B response. Planar wide-store admission
-and unexpected DDR traffic are rejected.
-
-From the repository root, after checking available space:
+- Tests all **16** preceding `WSTRB` values × `{4 byte lanes, 2 aligned halfwords, 1 dword}` = **112 cases** per profile (**896** stored-plane byte checks across VGA Write Mode 0 masked writes and Write Mode 1 32-bit latch copies + **208** source `RDATA` checks).
+- Waits for true backend drain completion rather than posted AXI `B` acknowledgement, and rejects planar wide-store admission or stray DDR traffic.
+- Discriminates cleanly: the pre-repair bridge produced `632` plane mismatches per profile even when `RDATA` appeared valid, whereas the production bridge passes with `0` mismatches across both ordinary and deployed-feature profiles.
 
 ```sh
-task_planar_out="$(mktemp -d "$PWD/verif/l1/obj_dir_axivgalanes_planar_XXXXXXXX")"
-bash verif/axivgalanes/run-planar-gate.sh --out "$task_planar_out"
+export TMPDIR=/home/yukidama/external/tmp
+planar_out=$(mktemp -d "$TMPDIR/obj_dir_axivgalanes_planar_XXXXXX")
+bash verif/axivgalanes/run-planar-gate.sh --out "$planar_out"
 ```
 
-The bounded runner enables bridge assertions by default and runs ordinary and
-deployed-feature profiles, using32 build jobs in the existing16GiB/128-task
-scope and a540-second total cap. Its300MiB leaf guard remains enforced.
-After compilation closes, exactly the two owned generated PCH files per
-profile are losslessly archived to adjacent `.recovery.gz` files. Their raw
-and archive identities/hashes/sizes are retained in `pch-recovery.tsv`;
-gzip integrity and expanded SHA are checked before removing only the exact
-unused raw PCHs. Models, objects, source, logs and evidence are retained.
-Rebuilding uses a fresh output leaf; any manual PCH recovery must target the
-explicit missing raw path and verify the receipt's expanded hash.
-
-The unchanged test fails on the pre-repair adapter even when source RDATA
-looks correct:632 plane mismatches per profile, versus zero on the repair.
-The old adapter's narrow-shape assertion must be disabled for this negative
-control; otherwise it stops before the storage checks. An expected negative
-control remains a failure, not a correctness PASS.
-
-Scope is VGA storage/read-latch behavior through the production adapter and
-L2 byte sequencer. It does not establish scanout, physical FPGA RAM collision
-or clock-domain fidelity, Windows desktop correctness, or Quake acceptance.
+> **Scope Note:** These leaf/seam gates verify VGA read-latch and planar byte-lane storage through `ven_axi2avalon` + `l2_cache` + `vga`. End-to-end physical VGA display + 128-RAMB36 frame capture are qualified on `main` release **`c0e3fe43`** (cold Windows 95 OSR2 GUI desktop + DOS Quake `demo1` `8.0 FPS`, **`0.515778001` total U+V gameplay IPC** across cycles `28,696,827,616–32,989,404,795`).

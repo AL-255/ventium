@@ -6,8 +6,9 @@ Ventium reconstructs the non-MMX Pentium P5/P54C in SystemVerilog. The current
 board is **RK-XCZU15EG-F**, part **xczu15eg-ffvb1156-2-i**, using Vivado **2025.2**.
 KV260 deployment recipes and early silicon failure lists are historical.
 
-- **main** publishes the frozen source profile of board-tested image
-  **2886d24c**, with a public FPGA build entry point and hash manifest.
+- **main** publishes the frozen source profile of board-qualified image
+  **c0e3fe43** (161 defines, `fpga/known_good_c0e3fe43.json`), with a public
+  fresh-source FPGA build entry point and hash manifest.
 - **experimental/uv-fast-ipc-apr** retains unqualified core/cache/performance/APR
   work and the full development harness; renamed from ao486-mister-sim.
   Do not replace its working RTL with the release snapshot or promote its RTL
@@ -18,13 +19,18 @@ KV260 deployment recipes and early silicon failure lists are historical.
 - Read README.md and HOW_TO_RUN_FPGA.md. Older experimental-branch procedure
   sections are forensic history; use the exact dated image/source profile.
 
-Last verified physical Quake gameplay: **0.496499864 total U+V IPC**, image
-**2886d24c**, cycles **625,021,130,428–629,480,208,865**; primary/U alone
-**0.383002768**. Counters include REP-element retirement. Quake completed at
-7.7 FPS near 40 MHz. Both CoreMark seeds passed up to 52.6316 MHz; that does not
-qualify Quake/Win95 at the higher clock. The conditional post-route timing
-estimate is **28.701817 MHz**, not 40 MHz STA sign-off. Win95/full-suite
-acceptance remains open for this programmable-clock image.
+Last verified physical Quake gameplay: **0.515778001 total U+V IPC**, image
+**c0e3fe43**, cycles **28,696,827,616–32,989,404,795**; primary/U alone
+**0.397847833** (prior release baseline `2886d24c`: `0.496499864` total U+V /
+`0.383002768` primary/U across cycles `625,021,130,428–629,480,208,865`).
+Counters include REP-element retirement. On `c0e3fe43`, Quake `demo1` completed
+at **8.0 FPS** (`969` frames / `121.2 s`) at measured `39.999802 MHz`, and all
+three standard-suite gates (both CoreMark seeds, cold Windows 95 GUI +
+interaction + shutdown, and cold Quake timedemo + gameplay) passed on hardware.
+Post-route static timing sign-off is closed at **40.264133 MHz** (`WNS +0.164 ns`,
+`WHS +0.010 ns` under the 40 MHz constraint). Empirical single-board runtime DRP
+overclock passes (`58.824 MHz` Win95+Quake, `62.500 MHz` Quake) are not STA
+sign-off above 40 MHz.
 
 ## Mandatory reporting and acceptance
 

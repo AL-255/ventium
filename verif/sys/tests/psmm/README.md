@@ -127,11 +127,15 @@ The RTL (`rtl/core/core.sv`, gated `sys_mode`) now implements the SMM mechanism:
 
 * **SMBASE** register (reset default `0x30000`) + **RSM** (`0F AA`) decode (RSM is
   `#UD` outside SMM / in user mode, so user-mode `make verify` stays bit-identical).
-* **`SMI#` source:** the RTL recognises the APIC self-IPI SMI exactly as qemu's
-  APIC does — on the **ICR-low write** (a store to physical `0xFEE00300` whose
-  value carries delivery-mode = SMI, bits[10:8]==`010`) it latches `smi_pending`,
-  and the SMI is taken at the **next instruction boundary** (not mid-instruction).
-  So the SAME bare-metal `psmm.bin` drives the RTL round-trip — no TB poke.
+* **`SMI#` source:** the RTL has a deliberately narrow APIC **self-IPI** model:
+  a completed full-dword store to physical `0xFEE00300` with delivery-mode = SMI
+  (bits[10:8]==`010`) and destination shorthand = self (bits[19:18]==`01`)
+  latches `smi_pending`.  The SMI is taken at the **next instruction boundary**
+  (not mid-instruction).  Partial ICR writes and non-self shorthand values do
+  not fabricate a local SMI; this is not a full local-APIC routing model.  The
+  SAME bare-metal `psmm.bin` drives the RTL round-trip — no TB poke.  A matching
+  write made while already in SMM remains pending and is accepted after `RSM`;
+  it cannot re-enter SMM mid-handler.
 * **`SMI#` entry (`S_SMI_SAVE`):** writes the CPU state to the SMRAM save-state map
   at the **documented P5 offsets** (Pentium Dev. Manual Vol.3 Table 20-1: CR0
   `@SMBASE+0xFFFC`, CR3 `+0xFFF8`, EFLAGS `+0xFFF4`, EIP `+0xFFF0`, EAX..EDI
@@ -171,11 +175,11 @@ RTL commits both from the writeable save slots, but `psmm.bin`'s handler leaves
 them unchanged, so only the round-trip-to-saved-value is exercised); the exact
 P5 reserved-area encoding for the hidden descriptor state (RTL-internal convention);
 **DR6 `@+0xFFCC` / DR7 `@+0xFFC8` / TR (selector) `@+0xFFC4` / LDT Base `@+0xFFC0`**
-(Table 20-1 defines these four in the save map; the RTL does NOT save/restore them
-across SMI#/RSM — debug registers are M2S.6 and there is no LDT-base register yet;
-TR exists but is left unchanged through SMM. The psmm corpus does not modify
-DR/TR/LDT in the handler, so the round-trip still closes — a real divergence from
-the full P5 save map, deferred honestly); and FPU / DR3–DR0 / the auto-saved TR
+(Table 20-1 defines these four in the save map; `DR6`/`DR7`, `LDTR`, and `TR` exist in
+core RTL, while these four SMRAM slots are not saved/restored across `SMI#`/`RSM` —
+the `psmm` corpus leaves `DR`/`TR`/`LDT` unmodified in the handler, and post-`RSM`
+executable flush + hidden segment-metadata restoration are additionally guarded by
+`run-prsmflush-gate.sh` and `run-psmmmeta-gate.sh`); and FPU / DR3–DR0 / the auto-saved TR
 state that Table 20-1 leaves implementation-private (not part of the corpus
 round-trip). The SMM Revision Identifier slot now carries the faithful P5 value
 `0x00020000` (bit 17 set) but is read-only / not restored by RSM.

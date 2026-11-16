@@ -46,7 +46,7 @@ import "DPI-C" context function void vtm_retire(
   V reports the live final state. Observation does not alter issue or clocks.
   The snapshot is excluded under `SYNTHESIS`/`VTM_NO_DPI`. This qualification
   does not cover the legacy `VEN_FXCH_FREE` folded x87-pair observer. See
-  [paired-state regression](UV_FAST_RETIRE_STATE_2026-10-08.md).
+  [differential comparator guide](../verif/diff/README.md).
 - The core calls this from a single always_ff retire point; pairing (two retires
   in one cycle, M4+) means two calls in the same clock with consecutive `n`.
 - **x87** (M3+) uses a second optional import `vtm_retire_x87(...)` called
@@ -64,7 +64,7 @@ Only final functional x87 record formatting is deferred; live counters,
 diagnostics, integer state and cycle observations are not delayed. A second
 owner, missing completion snapshot or unfinished trace is an error. This
 default-off integration is not yet behaviorally qualified; see
-`verif/issue_uv/FP_INTEGER_OVERLAP.md` for its acceptance gates and limitations.
+`verif/issue_uv/README.md` for its acceptance gates and limitations.
 The full-PC `ao486-sim/ven/vtm_dpi.cpp` observer does not format architectural
 x87 traces and leaves both valid events inert, just like its x87 snapshot
 callback. It must not delay live retirement counters or substitute FP results.
@@ -85,17 +85,18 @@ the shared arithmetic stream and checked early-command path; it is not a default
 configuration or a claim of full-system compatibility.
 
 `VEN_FP_FXCH_QUEUE` adds one ordered FXCH admission slot in front of the shared
-FPU and requires `VEN_FP_ASYNC_STREAM` in the core. A busy-leaf, masked FXCH
-can be accepted into that slot without changing the architectural stack yet.
-It generates the same kind-2 deferred owner as an asynchronous arithmetic
-command, and completes from the actual ordered leaf response. In particular,
-`cmd_accept_retire` is false for a queued exchange and remains false when that
-queued command is later dispatched internally. An idle, immediately executed
-exchange retains the original immediate-retirement contract. No synthetic FP
-snapshot or delayed live retirement counter is used. Interrupt/fault/debug drain
-gates remain in force. Leaf ordering/reset/metadata tests and the core QEMU
-overlap/INT3 gates are documented in `verif/issue_uv/FP_INTEGER_OVERLAP.md`;
-the profile remains opt-in pending full-system qualification.
+FPU (`fp_shared/ven_fp_fxch_queue.sv`) and pairs with `VEN_FP_ASYNC_STREAM` in the
+deployed `c0e3fe43` hardware profile (`161` defines; `0.515778001` total U+V /
+`0.397847833` primary/U physical Quake gameplay IPC across cycles
+`28,696,827,616–32,989,404,795`). A busy-leaf, masked FXCH can be accepted into
+that slot without changing the architectural stack yet. It generates the same
+kind-2 deferred owner as an asynchronous arithmetic command, and completes from
+the actual ordered leaf response. In particular, `cmd_accept_retire` is false for
+a queued exchange and remains false when that queued command is later dispatched
+internally. An idle, immediately executed exchange retains the original
+immediate-retirement contract. No synthetic FP snapshot or delayed live retirement
+counter is used. Interrupt/fault/debug drain gates remain in force; see
+`verif/issue_uv/README.md`.
 
 For x87 floating-point instructions the core calls `vtm_retire(...)` (integer
 state, unchanged) **and**, on the *same retirement* (same `n`), a second DPI-C

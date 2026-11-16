@@ -1,189 +1,36 @@
-# Ventium northbridge / full-system integration plan
+# Physical Memory Map, Coherence & Platform Integration Spec
 
-Glue the standalone L2 (`rtl/northbridge/ven_l2.sv`) and the `rtl/soc/*`
-peripherals into one coherent **Pentium-style system**, modeled on the Intel
-**430FX "Triton"** PCIset (82437FX **TSC** system controller + 82436FX **TDP**
-data path + 82371FB **PIIX** PCI-to-ISA bridge — datasheets archived under
-`ventium-refs/01-intel-canonical/CHIPSET/`).
-
-Locked scope decisions (2026-06-19):
-* **Chipset model:** 430FX Triton (canonical desktop P5; our PCI-config shim
-  already targets PIIX3).
-* **DMA coherence:** fine-grained per-line **snoop-invalidate from the start**
-  (the `EADS#`/`AHOLD` analogue) — no coarse `flush_all`-around-DMA interim.
-* **Top level:** a **new `ventium_system` top**; `ventium_soc.sv` (differential
-  oracle) and `ventium_kv260_core` stay intact so the regression suite keeps
-  running while the new system matures.
-
-Cross-refs: `fpga/L2_DESIGN.md` (the L2 it splices in), `docs/cache-tlb-structural-spec.md`,
-`docs/m5b-bus-spec.md`, the L1AXI seam in `rtl/mem/ventium_l1_axi.sv`.
+> **Current Status (Nov 2026 — Superseded on SoC/FPGA by MiSTer PC/AT + `ven_ddram_axi_posted`):**
+> - **Implemented & Active in `rtl/`:** `rtl/northbridge/ven_cachemap.sv` (430FX-style PAM/TOM physical region & cacheability classifier), `CR0.CD` + `KEN#`-equivalent uncacheable bypass, physical snoop-invalidation on both `ven_l1d.sv` and `icache.sv`, byte-exact narrow UC AXI transactions (`ven_axi_master.sv`), `route_err` non-DRAM protection (`ventium_l1_axi.sv`), and `VEN_L1D_STORE_POLICY` (`0xC0000–0xFFFFF` ROM/UMA protection).
+> - **Production PC Platform (`ao486-sim/` & `fpga/`, image `c0e3fe43`):** Instead of building custom `ven_northbridge` / `ven_southbridge` / `ven_l2` wrappers around the early `rtl/soc/*` models (now retired), Ventium integrates directly into the full **MiSTer PC/AT chipset** (`rtl_ven_soc.f`: dual `8259A` PIC, `8254` PIT, `8237` DMA, `MC146818` RTC, PS/2 keyboard & mouse, dual IDE, floppy, VGA, Sound Blaster 16 + OPL3) via `ao486-sim/ven/ven_ao486_shim.sv` + `ven_axi2avalon.sv`. Outer L2 is **disabled/bypassed** (`EN_L2 = 0`); DDR4 traffic on RK-XCZU15EG-F (`c0e3fe43`, `40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC) traverses `fpga/rtl/ven_ddram_axi_posted.sv` (16-slot posted write queue + CAM read-after-write bypass + architectural external-drain barrier) into ZynqMP `S_AXI_HP0_FPD` (`0x6000_0000` `no-map` DDR4 carveout).
 
 ---
 
-## 0. Starting reality (verified 2026-06-19)
+## 1. Physical Address Classification (`rtl/northbridge/ven_cachemap.sv`)
 
-* `ven_l1d` is **write-through** and caches **everything** — no cacheability /
-  `KEN#` concept; only the coarse `flush_all` pulse and the `golden_l1`
-  diagnostic exist. `icache` is fill-only, core-spine driven, also caches all.
-* `ven_l2.sv` is **standalone, not instantiated** anywhere; it is a drop-in for
-  the `ven_l1d.m_* → ven_axi_master.m_*` word-granular backing seam.
-* **No snoop / coherence mechanism exists.** IDE bus-master DMA (`ven_ide`,
-  `HAS_DMA=1`, real `dma_mem_*` port) and the fw_cfg DMA engine write DRAM with
-  zero L1/icache invalidation; the differential suite only dodges staleness by
-  **parking the core** (`core_mem_ack=0`) during a DMA burst. `ven_i8237` is
-  **register-only** (no transfer engine yet).
-* Two disjoint worlds: `ventium_soc.sv` wires `core` **directly** to memory
-  (DMA-priority mux + VGA-fb intercept, RTL peripherals, the QEMU differential
-  oracle); `ventium_kv260_core` uses `ventium_l1_axi` → PS-DDR with some
-  peripherals PS-emulated. Neither has a cacheability map or DMA snoop.
-* Port-I/O (`io_*`) is already a **separate bus** from `mem_*`, so it is
-  inherently uncacheable. The only thing the caches must learn to *not* cache is
-  **MMIO that lives in memory address space** (VGA aperture, BIOS/option-ROM
-  windows, the PCI memory hole, APIC).
+`ven_cachemap` decodes physical `addr[31:0]` combinationally into `{cacheable, region}` modeled on the Intel 430FX (82437FX TSC) PAM and Top-of-Memory (TOM) map:
+
+| Physical Range | Region & Default Cacheability | Handling in `ventium_l1_axi` & `ven_ao486_shim` |
+| --- | --- | --- |
+| `0x0000_0000 .. 0x0009_FFFF` | Conventional DRAM — **Cacheable WB** | Cached in `icache` + `ven_l1d` (when `CR0.CD == 0`). |
+| `0x000A_0000 .. 0x000B_FFFF` | Legacy VGA Aperture / SMRAM — **Uncacheable** | Never allocated in L1I/L1D; routed uncacheably to VGA plane RAMs (or DDR framebuffer in standalone TB). |
+| `0x000C_0000 .. 0x000F_FFFF` | Option ROM & BIOS Shadow (`PAM0`–`PAM6`) | Per-segment R/W + cacheability; under `VEN_L1D_STORE_POLICY`, `ven_ao486_shim` suppresses cached byte updates and invalidates resident L1D tags on writes so ROM-discard / UMA policy in the platform backend stays authoritative. |
+| `0x0010_0000 .. TOM - 1` | Extended System DRAM — **Cacheable WB** | Cached in `icache` + `ven_l1d` (minus optional 15–16 MiB ISA memory hole). |
+| `TOM .. 0xFFFD_FFFF` | PCI / Unmapped Memory Hole — **Uncacheable** | Outside the declared `ADDR_MASK` RAM window, `ventium_l1_axi` suppresses DDR aliasing and asserts sticky `route_err` → `bus_err`. |
+| `0xFFFE_0000 .. 0xFFFF_FFFF` | Top-of-4G BIOS Reset Vector Shadow | Mapped to high BIOS ROM / shadow RAM per platform fold. |
 
 ---
 
-## 1. The coherence model (the heart of it)
+## 2. Coherence, Ordering & External Drain Invariants
 
-Key invariant we get for free: **L1D is write-through**, so the CPU's L1 is
-never *dirtier* than downstream ⇒ **L2 is the single coherence point for DRAM**.
-
-| Master | Action | Requirement | Mechanism |
-|---|---|---|---|
-| CPU | r/w cacheable DRAM | normal | icache/L1D → L2 → DDR (`KEN#`=1) |
-| CPU | r/w MMIO (mem-space) | never cache | `KEN#`=0 → bypass L1D **and** L2, straight to bridge/DDR |
-| DMA | **read** DRAM | see latest (dirty L2) | DMA routed *through* L2 ⇒ coherent (L1 ⊆ L2 by write-through) |
-| DMA | **write** DRAM | invalidate stale CPU copies | DMA write updates L2 **and** northbridge issues a **per-line snoop-invalidate** to L1D + icache |
-
-Two new coherence primitives:
-1. **A cacheability decoder** (`KEN#` generator) shared by icache, L1D, L2, and
-   the bridge router — decided **once**, at the host-bus boundary, honored by all.
-2. **A per-line snoop-invalidate port** on `ven_l1d` and `icache`, driven by the
-   northbridge whenever a non-CPU master writes a cacheable line.
-
-DMA masters become **arbitrated requesters on the L2 upstream port** (not a
-parallel path to DDR): that makes reads coherent for free and gives one place to
-hang the invalidations. Fine-grained snoop removes the need to park the core
-during DMA (the core may keep running against L1/L2 while DMA proceeds).
-
----
-
-## 2. `ven_cachemap` — "what to cache and what not to" (the TSC PAM model)
-
-Combinational `addr[31:0] → {cacheable, region}`, modeled on the TSC PAM +
-cacheable-region registers. Faithful default layout:
-
-* `0x00000000 … TOM-1` — **cacheable WB DRAM**, minus the optional 15–16 MB ISA
-  memory hole.
-* `0x000A0000 … 0x000BFFFF` — VGA aperture / SMRAM: **uncacheable** (SMRAM
-  cacheability is a config bit; default uncached).
-* `0x000C0000 … 0x000FFFFF` — option-ROM + BIOS shadow, per **PAM0–PAM6** (each
-  PAM nibble = one 16/32/64 KB segment, R/W-enable + cacheable, per the TSC datasheet).
-* `TOM … 0xFFFDFFFF` — **PCI memory hole: uncacheable** (MMIO BARs, framebuffers,
-  APIC `0xFEC/0xFEE`).
-* `0xFFFE0000 … 0xFFFFFFFF` — top-of-4 G BIOS shadow: cacheable per PAM (the
-  SeaBIOS 32-bit POST region already special-cased in the L1AXI remap).
-
-* PAM / TOM / hole-enable registers live in **PCI config bus0:dev0 (host
-  bridge)** — extend the existing PCI-config shim. BIOS programs them at boot; we
-  ship sane reset defaults so bring-up doesn't depend on BIOS.
-* One module, used in four places, so the decode can never disagree with itself.
-* Unit-gated against a golden address→attribute table from the TSC datasheet.
-
----
-
-## 3. Teaching the caches `KEN#` (L1D / icache edits — additive, default-inert)
-
-* **`ven_l1d`**: add `cacheable` input — when `0`, no allocate / no hit-lookup,
-  the access passes straight to the backing master and the ack is forwarded
-  (uncacheable bypass). Add `snoop_inv_valid / snoop_inv_addr` that invalidates a
-  matching line independent of the core port.
-* **`icache`**: same `cacheable` gate on fills + same snoop-invalidate input
-  (covers DMA-loaded code).
-* Keep `flush_all` as the cosim fallback.
-
-Regression contract: with `cacheable` tied 1 and snoop tied 0, every existing
-gate stays **byte-identical**.
-
----
-
-## 4. Target topology
-
-```
-            ┌──────────────────────────────────────────────────────────────┐
-   core ───►│ icache (KEN#, snoop)        ven_l1d (KEN#, WT, snoop)         │
-  mem_*     └───────────────┬───────────────────────┬───────────────────────┘
-                            │ host backing port (one CPU requester)
-                            ▼
-        ┌──────────────────────── ven_northbridge (TSC/TDP) ────────────────────────┐
-        │  ven_cachemap (PAM+TOM)   requester arbiter   snoop/invalidate generator   │
-        │        │ cacheable           ▲   ▲                    │                     │
-        │        ├─────────────► ven_l2 ──► ven_axi_master ─────┼──► AXI4 → PS-DDR     │
-        │        │ uncacheable         │   │                    │                     │
-        │        └─────────────► MMIO/bypass router ────────────┼──► DDR-direct/bridge │
-        └───────────────────────────────┼───┼───────────────────┼──────────────────────┘
-   io_* (port I/O, uncacheable) ────────┼───┼─ DMA master ports ─┘ (snoop-inv → L1/IC)
-                                        ▼   │
-        ┌──────────────────── ven_southbridge (PIIX) ───────────────────────┐
-        │ PIC PIT RTC i8042 i8237(DMA) i8272 IDE(busmaster DMA) UART         │
-        │ ACPI-PM port92 VGAregs  +  PCI-config (host PAM regs, IDE BAR)     │
-        └────────────────────────────────────────────────────────────────────┘
-```
-
-`ven_northbridge` = TSC/TDP (host bus, cachemap, arbiter, L2, DDR master, snoop
-generator). `ven_southbridge` = PIIX (the `rtl/soc/*` peripherals + PCI-config,
-reused near-verbatim, exposing the DMA bus-master ports upward).
-
----
-
-## 5. Implementation ladder (each phase independently gated)
-
-* **Phase A — cachemap + `KEN#` in the caches.** `ven_cachemap` + unit gate; add
-  `cacheable`/snoop ports to `ven_l1d` & `icache`; prove byte-identical with
-  inert defaults. No topology change yet.
-* **Phase B — L2 spliced behind L1D (cacheable path).** Rewire
-  `ven_l1d.m_* → ven_l2.u_*` and `ven_l2.d_* → ven_axi_master.m_*` (the pure
-  rewire the L2 was built for). Re-run existing L1AXI boot/differential gates
-  (L2 transparent for cacheable) + add an L2 hit/eviction perf check.
-* **Phase C — `ven_northbridge` wrapper + uncacheable bypass.** Wrap {cachemap,
-  arbiter, L2, axi_master, bypass router}; route uncacheable mem-space (VGA
-  aperture, BIOS, hole) around L2; fold the current VGA-fb intercept into the
-  router so it works *with* caching on.
-* **Phase D — `ven_southbridge` + DMA as coherent requesters + fine-grained
-  snoop.** Wrap `rtl/soc/*`; lift `ven_ide.dma_mem_*` and a **new `ven_i8237`
-  transfer engine** into the arbiter as upstream requesters **through L2**; drive
-  per-line snoop-invalidate to L1D/icache on every cacheable DMA write; remove
-  core-parking. Directed coherence gates here.
-* **Phase E — unify the top.** New `ventium_system`:
-  `core → L1/icache → ven_northbridge → {L2/DDR, ven_southbridge}`. Port the
-  differential suite + FreeDOS boot onto it; prove byte-identical.
-* **Phase F — hardening.** Real-BIOS-driven PAM; SMRAM cacheability bit; the
-  `L2_DESIGN.md` §5 follow-ons (writeback buffer, burst writeback, SECDED ECC,
-  prefetcher, L2 flush-walker); optional snoop-cycle timing fidelity
-  (AHOLD/EADS#/HITM# on the modeled P5 bus).
-
----
-
-## 6. Verification
-
-* Every phase A–E keeps the existing suites **byte-identical** in the
-  inert/default state, plus a **new directed gate** per feature.
-* New gates: (1) cachemap golden-table; (2) `KEN#` bypass (uncacheable r/w
-  correct, no allocation); (3) **DMA-write → CPU-read coherence**; (4) **DMA-read
-  of dirty L2**; (5) icache invalidate on DMA'd code.
-* Reuse `verif/l1/run-l2-*.sh` + the `ventium_soc` differential flow.
-
----
-
-## 7. Risks / open issues
-
-* **Single-outstanding L2 + multi-requester arbiter** — DMA bursts lock the
-  arbiter for the burst (acceptable, mirrors bus mastering). Fine-grained snoop
-  lets the core run concurrently; confirm the arbiter ↔ snoop ordering is
-  race-free (a DMA write must invalidate before the CPU can re-read the line).
-* **icache coherence vs existing SMC handling** — don't double-handle.
-* **Two-worlds reconciliation** — the new top must preserve the differential
-  oracle path or the regression suite can't run; keep `ventium_soc.sv` alive.
-* **Fmax** — design is routing-bound ~35–50 MHz and the L2 is off the critical
-  path; keep the cachemap/arbiter mux shallow/registered so the host path
-  doesn't become critical.
+1. **Physical Snoop-Invalidate (`icache.sv` & `ven_l1d.sv`):**
+   - `icache.sv` records the physical page tag (`ic_ptag`) on every line fill. CPU stores and platform DMA writes snoop by **physical** address, invalidating all matching L1I and `uopcache` ways regardless of virtual/linear aliasing (`verif/l1/run-ic-alias-gate.sh`).
+   - `ven_l1d.sv` exposes `snoop_inv_valid` / `snoop_inv_addr` for non-CPU DMA writes to DRAM alongside `flush_all` / `smm_flush` / `a20_flush`.
+2. **Byte-Exact Uncacheable Accesses:**
+   - Port I/O (`io_*`) uses a dedicated uncached channel into the PC/AT I/O bus.
+   - Memory-mapped uncacheable accesses (`PCD=1`, `CR0.CD=1`, or `ven_cachemap` UC regions) bypass L1 allocation and fragment into aligned power-of-two single-beat AXI transfers with exact `ARSIZE`/`WSTRB`—never widening narrow MMIO reads or crossing a 4 KiB boundary (`verif/l1/run-l1axi-narrow-gate.sh`).
+3. **Posted DDR4 Queue & True External Drain Barrier (`ven_ddram_axi_posted.sv`):**
+   - On RK-XCZU15EG-F, `ven_ddram_axi_posted` absorbs up to 16 posted DDR4 writes with full CAM read-after-write hazard forwarding for subsequent CPU/DMA reads.
+   - **Invariant:** Local posted write acceptance is *not* external DDR completion. Before committing I/O cycles with external side effects, entering debug halt, or executing runtime MMCM DRP clock switches (`ven_pll_ctrl`), hardware waits on the true external DDR drain/fault barrier so no queued write remains in flight.
+4. **SMRAM Guard (`NB_SMRAM`):**
+   - Pre-lookup core-seam (`core_smram_deny`) and backing-seam SMRAM isolation plus SMM-exit `smm_flush` are implemented and verified in `tb_l1axi_smram`, remaining default-off (`NB_SMRAM = 0`) because `0x30000` is conventional DOS RAM on standard PC/AT guests (see [`unsupported-isa.md`](unsupported-isa.md) §B.5).

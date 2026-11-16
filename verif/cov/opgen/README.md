@@ -1,123 +1,39 @@
 <!-- Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com) -->
 <!-- SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1 -->
 
-# Per-opcode regression generator (`verif/cov/opgen/`)
+# Per-Opcode P54C Regression Generator (`verif/cov/opgen/`)
 
-A **script-generated** regression suite with ONE test per Pentium-P54C opcode,
-each covering all the cases for that opcode (every register, the ModRM memory
-forms, immediate spreads) — built from the machine-readable opcode reference so
-no opcode is missed by hand. The exhaustive ModRM/SIB **effective-address**
-decode is covered once (LEA) across all forms; per-opcode tests cover operand
-variants. Generation is **self-checking**: every test is assembled (gas rejects
-a mis-encoding) and diffed against the QEMU golden (a wrong result is a
-DIVERGE), so a missing/incorrect case can never pass silently.
+`verif/cov/opgen/` generates and runs a systematic per-opcode differential suite across all **555 non-MMX Intel Pentium (P5/P54C) opcode encodings** derived from `x86reference.xml` (`proc_start <= 5`, excluding P55C/MMX, P6 `CMOVcc`/`FCOMI`, SSE, and 64-bit forms).
 
 ## Pipeline
 
 ```sh
-python3 gen_opspec.py     # x86reference.xml -> opspec.json/.txt (THE checklist)
-python3 gen_easweep.py    # exhaustive ModRM/SIB EA sweep (697 LEA forms)
-python3 gen_tests.py      # one op_<key>/ test per opcode (+ opgen_status.txt)
-bash    run-opgen.sh      # PARALLEL build+golden+diff across all cores
+make opgen          # regen opspec + 721-form EA sweep + op_* tests, run in parallel, print 555-opcode accounting
+make opgen-modes    # run real-mode / PM32-CPL0 mode streams against qemu-system-i386
 ```
 
-* **`x86reference.xml`** — pinned copy of ref.x86asm.net's reference (the source
-  of coder32.html). `gen_opspec.py` filters it to **P54C** (`proc_start ≤ 5`:
-  8086…Pentium; MMX/SSE/PPro and 64-bit-only forms excluded) → **555 opcode
-  encodings** (372 with ModRM, 283 group `/digit`, 141 x87).
-* **`opspec.txt`** is the authoritative per-opcode checklist; **`opgen_status.txt`**
-  records, for every one, GEN (auto test) / MANUAL (with reason) — nothing is
-  silently dropped.
-* **`run-opgen.sh`** fans the per-opcode workload out across **all cores**
-  (`xargs -P $(nproc)`); each worker spins its own qemu-i386 gdbstub.
+Underlying scripts:
 
-## Status (PM32 / user, CPL3) — integer + x87 + branches + special
+| Script | Role |
+| --- | --- |
+| `gen_opspec.py` | Filters `x86reference.xml` to the 555 P54C encodings (`372` ModRM, `283` `/digit` group extensions, `141` x87) → `opspec.json` / `opspec.txt`. |
+| `gen_easweep.py` | Generates exhaustive 32-bit and `0x67` 16-bit ModRM/SIB effective-address `LEA` sweeps (`721` forms). |
+| `gen_tests.py` | Emits one `op_<key>/` assembly test per user-mode opcode (16/32-bit operand sizes, carry-in `CF=0/1` diversity, immediate spreads, prefix combinations) + `opgen_status.txt`. |
+| `run-opgen.sh` | Parallel build + `qemu-i386` golden + default `tb_ventium` run + `compare.py --mode func` across cores; fails on any **new** divergence not listed in `known_diverge.txt`, and flags any cataloged entry that now passes as `RESOLVED`. |
+| `gen_modes.py` / `run-modes.sh` | Generates and diffs real-mode and PM32-CPL0 privileged/segment/far-transfer/interrupt streams against `qemu-system-i386`. |
+| `run-transc.sh` | Re-runs transcendental opcodes against the feature-enabled `cov-feat` (`+VEN_TRANSCENDENTAL +VEN_FPREM +VEN_BCD_ITER +VEN_SRT_ITER`) build. |
+| `coverage_report.py` | Reconciles all 555 P54C opcodes into `TESTED`, `MODE`, `COSIM`, `FINDING` (`known_diverge.txt`), `DEFER`, and `SKIP` (`0` uncovered). |
+| `gen_repros.py` | Emits standalone minimal single-instruction reproducers (`repros/`, `REPROS.md`) for cataloged default-build findings. |
 
-`make opgen` (parallel, ~20 s on 32 cores): **401 PASS + 25 KNOWN + 0 NEW-FAIL
-+ 0 ASM-FAIL** (clean), 436 op_* tests + the EA sweep + the synthetic
-`op_prefixes` test. The runner fails only on a **NEW** divergence, so a
-regression cannot hide. `make opgen-modes` runs the real-mode/CPL0 lane.
+Generated test directories (`tests/`, `modes/`) are gitignored build artifacts.
 
-### Self-improvement log (continuous campaign)
+## Default-Build Catalog (`known_diverge.txt`) vs Full-P5 / System Gates
 
-* **cycle-mode coverage pass** — a `--cycle` pass over the flats lifts
-  `decode.sv` 69 %→**100 %** line, core_fastpath 92.6 %, opgen core 56→60 %.
-* **minimal repros** (`gen_repros.py` → `repros/`, `REPROS.md`) — one isolating
-  instruction per finding for the RTL owner.
-* **16-bit operand-size (66-prefix)** variants on the two-operand ALU/MOV ops.
-* **16-bit addressing** (`addr16`/0x67) added to the EA sweep (721 forms,
-  EQUIVALENT to QEMU).
-* **prefix-combination** decode test (LOCK / segment-override / 66 / 67 / REP).
-* **carry-in diversity** — ADC/SBB/RCL/RCR run with CF=0 and CF=1.
-* **mode streams** (5, all EQUIVALENT to qemu-system at CPL0): `realmode_flags`,
-  `realmode_seg`, `realmode_priv` (MOV CR/DR, LGDT/LIDT), `realmode_int`
-  (INT/INT3/INTO/IRET), `realmode_far` (9A/CB/CA/EA + indirect FF/3,/5).
-* **generator self-test** (`selftest.sh`) — CI that regen holds the invariants.
+`run-opgen.sh` tests the **minimal default `ventium_top` user-mode build** (`verif/tb/obj_dir/tb_ventium`, without `KV_FULL_DEFS` / `VEN_FP_SHARED` / `--cosim`). Several entries in `known_diverge.txt` reflect intentional default-build gating or CPL3 `linux-user` semantics rather than defects in the full-P5 system/FPGA profile (`c0e3fe43`):
 
-### Findings — surfaced here, fixed by the RTL owner, auto-tracked by the suite
+- **Resolved in `opgen` (`RESOLVED` & regression-protected):** Memory-destination `BT`/`BTS`/`BTR`/`BTC` (register and immediate forms, `0F A3/AB/B3/BB`, `0F BA /4..7`) and memory-destination `SHLD`/`SHRD` (`0F A4/A5/AC/AD`).
+- **Feature-gated x87 transcendentals (`TRANSC`):** `F2XM1`, `FYL2X`, `FPTAN`, `FPATAN`, `FYL2XP1`, `FSINCOS`, `FSIN`, `FCOS` halt loudly (`d_unknown → S_HALT`) when `+VEN_TRANSCENDENTAL` is off in the plain default build, and execute in `+VEN_TRANSCENDENTAL` / `VEN_FP_SHARED` (`u_fp_shared` on `c0e3fe43`, verified in `verif/trsc/` and `fp_shared/tb/`).
+- **CPL3 `linux-user` vs CPL0 system semantics (`MODE-CPL0`):** `CLI`, `STI`, and `POPF` IOPL behavior differ under QEMU `linux-user` at CPL3; verified `EQUIVALENT` at CPL0 in `run-modes.sh` and `make verify-sys` (`ppopf`, `pv86`).
+- **System / full-profile instructions covered by `verif/sys/`:** `CLTS`, `INVLPG`, `LMSW` (`verif/sys/lmsw/`), `SMSW` (`verif/sys/smsw_memory/`), `LAR`/`LSL`/`VERR`/`VERW`/`SLDT`/`STR` (`verif/sys/tests/pverrw/`, `pltr`), segment `POP ES/SS/DS/FS/GS`, and `MOV moffs` (`A0–A3`) are exercised in `--system` / full-P5 configurations (`make verify-sys` and physical Win95/Quake/Doom on `c0e3fe43`).
 
-The runner flags any cataloged finding that now PASSes as **RESOLVED**, and the
-catalog self-corrects (the fixed op joins the must-pass/regression-protected set).
-This has already driven **12 real RTL fixes** the owner landed in response —
-**SHLD/SHRD-on-memory** (op_0fa4/a5/ac/ad) and **BT/BTS/BTR/BTC-on-memory**
-(op_0fa3/ab/b3/bb + op_0fba_4-7) — each detected automatically.
-
-Remaining open findings the sweep surfaced:
-
-| class | n | what |
-|-------|--:|------|
-| **CORE-GAP** | 4 | `POP ES/SS/DS/GS` HALT (segment-POP gaps). *(BT/SHLD-on-memory now RESOLVED.)* |
-| **TRANSC** | ~10 | `F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FYL2XP1/FSINCOS/FSIN/FCOS` deferred → HALT without `+VEN_TRANSCENDENTAL`; `FPREM1` differs on the `fstat` C2 flag. Verify they're feature-gated (not broken): `make -C verif/tb cov-feat && bash run-transc.sh`. |
-| **MODE-CPL0** | 3 | `CLI/STI/POPF` diverge on IF/IOPL at CPL3 — CPL3-user semantics, confirmed correct at CPL0 by the mode lane (not core bugs). |
-| **PM descriptor** | 6 | `LAR/LSL/VERR/VERW/SLDT/STR` (0F 00/02/03) HALT — found by the PM32-CPL0 stream. |
-
-## Dimensions
-
-| dimension | status |
-|-----------|--------|
-| operand cases (reg/mem/imm, all ModRM/SIB via LEA) | done, EA sweep EQUIVALENT to QEMU |
-| PM32 / CPL3 (user) — integer | done |
-| **x87** (D8–DF, 141 incl. distinct transcendentals via `sec_opcd`) | done |
-| **branches** (Jcc rel8/rel32, CALL/JMP/RET, LOOP, JECXZ, near-indirect) | done |
-| special operands (LEA/SHLD/SHRD/AAD/AAM/CMPXCHG8B/string/PUSH-POP-rm) | done |
-| **mode**: real-mode / CPL0 (flags, IF/IOPL, privileged MOV CR0/DR7, 16-bit) | done (vs qemu-system) |
-| **mode**: real-mode/CPL0 far + INT/IRET streams (9A/CB/CA/EA/FF3,5, INT/INTO/IRET) | done (vs qemu-system) |
-| **mode**: PM32-CPL0 (protected-mode entry + CLI/STI/POPF + MOV CR/DR) | done (vs qemu-system) |
-| MANUAL (priv/io/far/seg/MOV-Sreg/MOV-moffs/fault) | listed in `opgen_status.txt` |
-
-**PM32/user: 436 GEN, 397 PASS + 29 KNOWN + 0 NEW-FAIL** (clean). The 29 KNOWN
-(`known_diverge.txt`) are real findings: CORE-GAP (BT/BTS/BTR/BTC and SHLD/SHRD
-with a **memory** operand HALT; POP ES/SS/DS/GS HALT), TRANSC (transcendentals
-deferred without `+VEN_TRANSCENDENTAL`), MODE-CPL0 (CLI/STI/POPF).
-
-**Mode lane** (`run-modes.sh`): the real-mode flag/IF/IOPL/privileged stream is
-**EQUIVALENT to qemu-system at CPL0** — confirming the MODE-CPL0 findings are
-CPL3-user-mode semantics, not core bugs, and covering the privileged paths the
-user lane can't reach.
-
-```sh
-bash run-opgen.sh    # PM32/user, parallel, vs qemu-i386
-bash run-modes.sh    # real-mode/CPL0, vs qemu-system
-```
-
-Generated tests (`tests/`, `modes/`) are gitignored build artifacts — run the
-generators to (re)create them.
-
-## 100% ISA coverage accounting (`coverage_report.py` → `COVERAGE.txt`)
-
-Every one of the **555 P54C opcodes** is accounted for (`python3 coverage_report.py`):
-
-| bucket | n | meaning |
-|--------|--:|---------|
-| TESTED | 406 | generated `op_*` test, differential **PASS** vs qemu-i386 |
-| FINDING | 30 | generated test that diverges — real core bug, **cataloged** (`known_diverge.txt`), for the RTL owner to fix |
-| COSIM | 16 | IN/OUT/CPUID/RDTSC/INVD/WBINVD — covered by the `--cosim` lane (gated ops) |
-| MODE | 50 | privileged / seg / flag / **far / INT-IRET** ops — covered by the 5 real-mode/CPL0 streams (`run-modes.sh`, vs qemu-system) |
-| DEFER | 1 | residual |
-| SKIP | 52 | prefixes, undocumented x87 aliases, removed-on-Pentium (TR regs), invalid POP CS — not standalone-testable |
-| **UNCOVERED** | **0** | — |
-
-**100.0% covered.** No opcode is un-addressed: each is validated, a cataloged
-finding, lane-covered, or justifiably skipped. The 30 FINDINGs are the analysis
-output (real core gaps — BT/SHLD-on-memory, POP-seg, transcendental-deferred,
-CLTS/LMSW/INVLPG, MOV-moffs); the RTL is untouched.
+> **Decoder Change Invariant (`AGENTS.md`):** Whenever decoder behavior changes, review every changed arm and update `tools/opcode_map/coverage_data.json` before regenerating its fingerprint/table — never refresh only the fingerprint to conceal semantic drift.

@@ -97,11 +97,7 @@ and all transcendentals (`F2XM1, FSIN, FCOS, FSINCOS, FPTAN, FPATAN, FYL2X, FYL2
 
 ## Use in Ventium
 
-- **M4 pairing checker** must implement exactly this classification + the §5.6.3–5.6.5
-  conditions. Verify the RTL's pair/no-pair decision against this table (especially
-  the subtleties flagged above: partial-reg contention, TEST/PUSH/POP operand-form
-  dependence, `SHLD/SHRD`/`NEG`/`NOT`/`JCXZ` = NP, only *direct-near* branches PV,
-  the eflags-write & anti-dependence exceptions, and the special pairs).
+- **Pairing checker (`rtl/core/issue_uv.sv` & `decode.sv`):** Implements this exact classification and the §5.6.1–§5.6.5 conditions (partial-register contention on the containing 32-bit GPR, `TEST`/`PUSH`/`POP` operand-form rules, `SHLD`/`SHRD`/`NEG`/`NOT`/`MOVZX`/`MOVSX`/`JCXZ` = `NP` even when executed in 1 clock on the `S_PIPE` U-pipe fast path, only direct-near branches = `PV`, dual EFLAGS writers + anti-dependence allowed, `ESP` & `CMP`/`ALU`+`Jcc` special pairs, and `addr[4:2]` 8-bank D-cache conflict stalls via `ven_p54_bank_arb.sv`). On `fp_shared/`, `FXCH` overlap is handled through `ven_fp_fxch_queue.sv`. Verified in `verif/issue_uv/run_u_alu_system.py` and board-qualified on RK-XCZU15EG-F image **`c0e3fe43`** (`0.515778001` total U+V / `0.397847833` primary/U Quake gameplay IPC across cycles `28,696,827,616–32,989,404,795`).
 - **Cross-check** against the independent measurements in Agner Fog's instruction
   tables (`ventium-refs/03-optimization-timing/agner-fog-instruction-tables.pdf`) when
   they disagree; AP-500 is Intel-first-party and is the primary authority here.

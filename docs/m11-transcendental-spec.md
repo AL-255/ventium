@@ -1,5 +1,7 @@
 # M11 — x87 Transcendentals (F2XM1/FPATAN/FYL2X/FYL2XP1/FSIN/FCOS/FSINCOS/FPTAN)
 
+> **Current Status (Nov 2026 — COMPLETED & CONSOLIDATED into `fp_shared/ven_fp_trans.sv`):** All 8 x87 transcendentals are implemented and board-qualified. In production (`+VEN_FP_SHARED` + `+VEN_TRANSCENDENTAL`, RK-XCZU15EG-F image **`c0e3fe43`**, `40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC), the separate M11 leaf engines below (`rtl/fpu/fpu_f*.sv`, `131k` LUTs / `1,317` DSPs) are superseded by the single table-driven **`fp_shared/ven_fp_trans.sv`** microsequencer sharing `ven_fp_alu`, `ven_fp_widemul`, `ven_fp_estdiv`, and `fpu_srt_div` (~`31k` LUTs / `30` DSPs; verified bit-exact against these engines across 1,640 A/B vectors in `tb_ven_fp_trans.sv`). See [`../fp_shared/README.md`](../fp_shared/README.md). The Group A / Group B mathematical & QEMU oracle split below governs both implementations.
+
 **STATUS: COMPLETE (#11, 2026-06-09).** All 8 x87 transcendentals are implemented
 as iterative microcoded engines, gated behind `+VEN_TRANSCENDENTAL`. The default
 build is byte-identical (they still decode to `d_unknown` → HALT there, so

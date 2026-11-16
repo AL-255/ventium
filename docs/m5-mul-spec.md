@@ -1,5 +1,7 @@
 # M5 MUL/IMUL staged-timing design spec
 
+> **Current Status (Nov 2026 — COMPLETED):** Implemented and gated in `rtl/core/core_exec.svh` + `verif/m5_metrics.py` (`mb_mul`, `mb_imul2`). On RK-XCZU15EG-F hardware (image **`c0e3fe43`**, `40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC), integer multiplication maps cleanly onto `9` `DSP48E2` slices inside `core` while preserving exact `CF`/`OF` overflow flags and modeled 10-cycle U-pipe non-pairable occupancy.
+
 Status: **IMPLEMENTED + GATED (2026-06-05).** REVIEW_Jun5.md Limit #5,
 Actions 3/5/7/8 for the integer multiply family.
 

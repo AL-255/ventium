@@ -1,6 +1,8 @@
 # M5 — cache-cycle + x87/FP-cycle accuracy spec
 
-M5 (PLAN §7, re-scoped) extends the M4 cycle model with the two pieces M4
+> **Current Status (Nov 2026 — COMPLETED & UPGRADED to Real Caches/FPU on SoC/FPGA):** M5's standalone `p5model` cycle bands (`make m5` / `make verify`) are implemented and active for unit regression. On full-PC simulation and RK-XCZU15EG-F hardware (`+VEN_L1_AXI` + `+VEN_FP_SHARED`, image **`c0e3fe43`**, `40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC), tag-only `dcache_timing.sv` and fixed-penalty stubs are superseded by the real **8 KiB 2-way L1 I-Cache** (`icache.sv`), **8 KiB 2-way 8-bank dual-port-read L1 D-Cache** (`ven_l1d.sv`), **32-entry 4-way I-TLB / 64-entry 4-way D-TLB** (`tlb_assoc.sv`), and pipelined **`fp_shared/`** x87 FPU. See [`cache-tlb-structural-spec.md`](cache-tlb-structural-spec.md).
+
+M5 extends the M4 cycle model with the two pieces M4
 deliberately deferred and that the **p5model oracle can differentially verify**:
 **(1) cache-miss cycle timing** and **(2) x87/FP cycle accuracy**. The pin-level
 64-bit **bus protocol** (ADS#/BRDY#/NA#/KEN#/CACHE#/HITM#/burst/locked/pipelined/

@@ -11,10 +11,19 @@ TLB / code cache / data cache / prefetch buffer, and the retired-instruction
 trace with raw bytes and disassembly.
 
 It does **not** modify `rtl/` or the verification build — it verilates a private
-copy of `ventium_top` with `--public-flat-rw` so the C++ bridge can read every
-internal core/cache/TLB/FPU signal directly out of the model (a cross-module
-reference into the live RTL state), and drives the exact `clk`/reset/`mem_*`
-loop the production testbench (`verif/tb/tb_main.cpp`) uses.
+copy of `ventium_top` (`rtl/ventium.f`, or `rtl/ventium_soc.f` with `--soc`)
+using `--public-flat-rw` so the C++ bridge can read internal core/cache/TLB/FPU
+signals directly out of the model, and drives the exact `clk`/reset/`mem_*` loop
+the unit testbench (`verif/tb/tb_main.cpp`) uses.
+
+> **Scope vs. Physical FPGA Release (`c0e3fe43`):** `pipeviz` is an interactive
+> microarchitectural inspection tool backed by `rtl/ventium.f` and the tag-only
+> `dcache_timing` model; it is not a full-PC or FPGA acceptance gate. Current
+> verified physical DOS Quake gameplay IPC on **RK-XCZU15EG-F** release image
+> **`c0e3fe43`** (`rtl_ven_core.f` + `rtl_ven_soc.f` + `ven_l1d`, `40.264133 MHz`
+> STA-signed-off) is **`0.515778001` total U+V** (`0.397847833` primary/U-only)
+> across cycles **`28,696,827,616–32,989,404,795`** (see top-level
+> [`README.md`](../../README.md)).
 
 ![overview](docs/overview.png)
 
@@ -72,11 +81,14 @@ python3 -m pip install -r tools/pipeviz/requirements.txt
 
 `run.sh` checks the interpreter and imports before any potentially long
 Verilator build, and prints that command instead of a traceback when they are
-absent. Set `PIPEVIZ_PYTHON` to select an
-environment explicitly, for example:
+absent. Set `PIPEVIZ_PYTHON` to select a Python environment explicitly and
+`VENTIUM_VERILATOR_BIN` when Verilator is installed outside `PATH` (builds
+automatically route through `tools/build_scope.sh` and
+`tools/verilator_serial.sh`):
 
 ```sh
-PIPEVIZ_PYTHON="$HOME/miniconda3/bin/python" tools/pipeviz/run.sh
+VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator \
+  PIPEVIZ_PYTHON="$HOME/miniconda3/bin/python" tools/pipeviz/run.sh
 ```
 
 It also rebuilds when the bridge, ctypes ABI, RTL/file lists/includes, or memory
@@ -457,11 +469,11 @@ host I/O drivers.
 | `verify_authoring.py` | Assembly/C completion, diagnostics, build, execution, and PC↔source regression |
 | `pipeviz/source_view.py` | line-numbered Assembly/C editors, GNU toolchain integration, and source mapping |
 | `pipeviz/isa_catalog.py` | Ventium/P54C mnemonic descriptions, availability, and pipeline metadata |
+| `examples/fibonacci_uv.c` | freestanding dual-chain C example demonstrating U/V issue |
+| `docs/user-guide.md` | guided workflow examples and their regression commands |
+| `docs/improvement-log.md` | summary of visual/UX architecture and regression invariants |
 
 After `build.sh`, run `tools/pipeviz/smoke_test` from any directory for a
 native C ABI check. It locates the verification image relative to its own
 binary and fails if the fixture cannot be loaded or no real activity is
 observed.
-| `examples/fibonacci_uv.c` | freestanding dual-chain C example demonstrating U/V issue |
-| `docs/user-guide.md` | guided workflow examples and their regression commands |
-| `TESTING_Jul29.md` | full interactive acceptance procedure, observations, and limitations |

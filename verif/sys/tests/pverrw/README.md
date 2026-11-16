@@ -5,9 +5,10 @@ Status: the parent-owned repaired all-ten gate passes on frozen TBfe4a in
 pinned-QEMU architectural comparison;9/10 pass their explicit Intel-spec
 contracts. The first all-ten run's CASE7 QEMU fixture failure is preserved.
 The fixture author has run host checks and bounded CASE7 QEMU diagnostics, not
-a DUT. Neither directed gate is Win95 evidence. The verified gameplay baseline is IPC
-0.44499855 on cdcb over cycles 6.9–7.0B; it predates the current candidate,
-which has no gameplay measurement.
+a DUT. Neither directed gate alone establishes OS acceptance (subsequently qualified end-to-end
+on `main` release `c0e3fe43`, which passes cold Windows 95 OSR2 GUI and DOS Quake `demo1`
+at **`0.515778001` total U+V / `0.397847833` primary/U gameplay IPC** across cycles
+`28,696,827,616–32,989,404,795`).
 
 Historical first-seven freeze, committed in `aafc924`: source SHA256
 `56ef7b7ce06336951e6ee45fe60235914b2d9b2e003f1cc2640c6b75b1ddad0c`,

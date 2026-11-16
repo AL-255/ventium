@@ -1,8 +1,9 @@
 # M2S.1 — protected-mode segmentation + real-mode boot
 
+> **Current Status (Nov 2026 — COMPLETED):** Real-mode reset, `CR0.PE` transition, GDT/LDT descriptor loads, hidden segment caches, privilege/type checks (`rtl/core/ventium_sys_pkg.sv`, `core_seg_ljmp.svh`), and relocated/bounded `S_PIPE` protected-mode fast execution (`VEN_SYS_FASTPATH*`) are implemented, gated in `make verify-sys`, and physically qualified on RK-XCZU15EG-F image **`c0e3fe43`** (`0.515778001` total U+V Quake gameplay IPC, cold Win95 OSR2 + Quake).
+
 First RTL stage of M2S (system mode), gated against the `qemu-system-i386` golden
-(M2S.0). Large: the core today is flat/user-mode (boots at a loader-supplied
-entry, segments constant, no CRx, `int 0x80`=halt); M2S.1 adds the **cold-boot →
+(M2S.0). M2S.1 added the **cold-boot →
 real mode → protected-mode segmentation** front half of a real x86.
 
 ## The dual-boot-mode design (the crux)

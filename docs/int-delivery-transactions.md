@@ -1,7 +1,8 @@
 # Interrupt-delivery transaction boundaries
 
-What "transactional delivery" means on this core, per delivery class. Named here
-so the boundary is stated, not implied by whichever state was touched last.
+What "transactional delivery" means on this core, per delivery class (`rtl/core/core_int_deliver.svh` and `rtl/core/ven_frame_plan.sv`). Named here so the boundary is stated, not implied by whichever state was touched last.
+
+> **Current Status (Nov 2026):** Active in `rtl/core/` and verified across `make verify-sys` (`pxprobe`, `pxwrap`, `pxwrapm`, `psamepf`) as well as cold Windows 95 OSR2 GUI + DOS Quake `demo1` on RK-XCZU15EG-F image **`c0e3fe43`** (`0.515778001` total U+V gameplay IPC). Note: protected-mode segment/limit enforcement on `S_PIPE` fast paths is active under `VEN_SYS_FASTPATH*`, while full slow-path `VEN_SEG_ENFORCE` remains gated off by default (see [`unsupported-isa.md`](unsupported-isa.md) §D).
 
 ## Cross-privilege (TSS-stack) delivery
 

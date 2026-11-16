@@ -94,6 +94,7 @@ Win95 wait cause. The saved 450M Win95 TSS bitmap permits the PIC ports, so
 this ISA defect is not evidence that denied PIC I/O caused that wait.
 It does not replace the standard suite.
 
-Latest verified gameplay baseline: 0.42089513 on build 2e63, cycles 3.0B–3.1B,
-predating IDE-fixed build 3120 and the V86 I/O candidate (full-PC cdcb6faa).
-Those candidates have no gameplay measurement yet.
+Latest verified physical gameplay baseline (`c0e3fe43` on `main`, 2026-11-14):
+**`0.515778001` total U+V IPC** (`0.397847833` primary/U-only) across interior Quake
+gameplay cycles `28,696,827,616–32,989,404,795` (`8.0 FPS`; cold Windows 95 OSR2 GUI
+also qualified on `c0e3fe43`).

@@ -1,50 +1,61 @@
-# Completed simulator disk writes — October 10, 2026
+# Simulator Disk-Write Host Visibility (`ao486-sim/ps/ps_shim.cpp`)
 
-The PS stdio shim could acknowledge a write while its final bytes remained in
-libc's buffer. An independent live FAT observer could therefore miss a completed
-guest update until another seek or file close. Buffered writes to `/dev/full`
-also incorrectly reported success. This is a host simulation bug, not a CPU
-performance fix.
+In `ao486-sim/ps/ps_shim.cpp`, guest IDE/VHD sector stores pass through
+`FileWriteAdv` and `FileWriteSec`. Leaving written bytes buffered inside `libc`
+`FILE*` streams caused two host-side defects during long full-PC simulations:
 
-`FileWriteAdv` now requires a complete `fwrite` **and successful `fflush`** before
-reporting success; `FileWriteSec` uses the same path. This applies to all guests
-and write sizes, without adding guest clocks or modifying RTL. It guarantees
-visibility to other host readers, not power-loss durability (`fsync`). The ATA
-caller's handling of failed writes is a separate, unresolved issue.
+1. External host observers inspecting a live guest FAT/result sector saw stale
+   on-disk bytes until a subsequent `fseek` or simulator exit flushed the buffer.
+2. Deferred `libc` buffer flushes (for example against a full scratch volume or
+   `/dev/full`) falsely returned write success at sector-submission time.
 
-## Closed regression
+`FileWriteAdv` (shared by `FileWriteSec`) requires both a complete `fwrite` **and
+an immediate `fflush == 0`** before reporting success to the ATA layer. This
+guarantees immediate visibility to independent host file descriptors on the same
+machine without adding guest cycles, altering RTL timing, or forcing `fsync`
+disk-platter latency on every sector.
 
-`test_disk_write_visibility.cpp` links the actual PS shim. It tests 18 writes
-(1, 511, 512, 513, 4096 and 8192 bytes at three offsets) through an independent
-descriptor **before closing the writer**, then checks final bytes and a
-neighboring untouched byte. Two `/dev/full` cases check deferred errors.
+> **Qualification Context (`c0e3fe43`, 2026-11-14):** This is a host C++
+> simulator I/O invariant, not a CPU/RTL change. Current verified physical Quake
+> gameplay IPC is **`0.515778001` total U+V** (`0.397847833` primary/U-only,
+> counters include `REP`-element retirement) on **RK-XCZU15EG-F** release image
+> **`c0e3fe43`** across cycles **`28,696,827,616–32,989,404,795`** (`8.0 FPS` at
+> `40.000 MHz`, `40.264133 MHz` STA-signed-off).
 
-| Actual implementation | Stale live reads | Falsely successful errors | Native exit |
-|---|---:|---:|---:|
-| Frozen control `623dcb7e…` | 18/18 | 2/2 | 1 |
-| Fixed shim | 0/18 | 0/2 | 0 |
+---
 
-Evidence: `/home/yukidama/external/tmp/ventium-stdio-visibility.WtUyV8Ue/checked/`.
-The runner records source pins, compiler commands and actual native exits.
-Reproduce with a **new** output directory:
+## Standalone Regression (`test_disk_write_visibility.cpp`)
+
+`ao486-sim/ven/test_disk_write_visibility.cpp` links against the real
+`ps_shim.cpp` implementation and verifies:
+
+- **18 live-visibility cases** (`1`, `511`, `512`, `513`, `4096`, and `8192`
+  bytes across three file offsets) read back through an independent open file
+  descriptor *before* closing the writer, confirming exact payload bytes and
+  untouched neighboring bytes (`0/18` stale reads).
+- **2 write-error cases** against `/dev/full`, confirming immediate failure
+  return rather than silent buffered acceptance (`0/2` false successes).
+
+Run the candidate check directly against any private `Vsystem.h` model directory
+and `/tools/verilator/v5.046/share/verilator/include`, or run the full
+control-versus-candidate runner (`run_disk_write_visibility.py`) with a
+pre-fix `ps_shim.cpp` control (`623dcb7e…`) and a fresh `/home/yukidama/external/tmp`
+leaf:
 
 ```sh
-TMPDIR=/home/yukidama/external/tmp python3 -B ao486-sim/ven/run_disk_write_visibility.py \
-  --control-shim /home/yukidama/external/tmp/ventium-code-payload-soc.1oJrvfzN/source/ao486-sim/ps/ps_shim.cpp \
-  --model-dir /home/yukidama/external/tmp/ventium-code-payload-soc.1oJrvfzN/obj1-speed-q16-parentpolicy \
-  --out /home/yukidama/external/tmp/stdio-visibility-new-run
+export TMPDIR=/home/yukidama/external/tmp
+VINC=/tools/verilator/v5.046/share/verilator/include
+
+# Standalone candidate check against a private full-PC model directory:
+g++ -std=c++17 -O1 -ffunction-sections -fdata-sections \
+  -I"$VARIANT_OBJ" -I"$VINC" -I"$VINC/vltstd" -Iao486-sim/ps \
+  ao486-sim/ps/ps_shim.cpp ao486-sim/ven/test_disk_write_visibility.cpp \
+  -Wl,--gc-sections -o "$TMPDIR/test-disk-write-visibility"
+mkdir -p "$TMPDIR/stdio-vis-data" && "$TMPDIR/test-disk-write-visibility" "$TMPDIR/stdio-vis-data"
+
+# Full control + candidate receipt runner (requires pre-fix 623dcb7e control shim):
+python3 -B ao486-sim/ven/run_disk_write_visibility.py \
+  --control-shim /path/to/frozen/pre_fix_ps_shim.cpp \
+  --model-dir "$VARIANT_OBJ" \
+  --out "$TMPDIR/stdio-visibility-check"
 ```
-
-Two superseded cold Quake controls were gracefully stopped after checking their
-native identity. Their closed disks independently passed the unchanged timedemo
-checker: 969 frames in 138.4 seconds (`652de481`, 7.0 FPS) and 128.1 seconds
-(`86731249`, 7.6 FPS), at modeled 40 MHz. Both exited normally, with logs,
-captures and media preserved. They had not triggered the live completion
-observer. Buffering is a reproduced explanation for missed live writes; no
-pre-stop FAT snapshot proves it was the specific cause in those two runs.
-These are older Quake component passes, not current-candidate or full-suite passes.
-
-The already-running `4fb1bdae` suite binaries remain frozen and **do not contain
-this host repair**. No running input was replaced. Their gameplay IPC remains
-unmeasured. The latest verified older baseline is **0.46555093 U+V event IPC**
-on `bfb867f7`, cycles 4,300,065,237–4,400,065,237; this host-only test measures no IPC.

@@ -1,326 +1,93 @@
-# FPGA synthesis & APR (KV260 / ZU15EG)
+# FPGA Synthesis, Place-and-Route & Physical Layout (`RK-XCZU15EG-F`)
 
-> **Historical synthesis report.** This page records the earlier KV260 flow and
-> out-of-context ZU15EG experiments. Several referenced `fpga/` scripts and
-> artifacts are absent from the current `ao486-mister-sim` checkout; its active
-> full-PC target is a different RK-XCZU15EG-F integration. Use
-> [`../HOW_TO_RUN_FPGA.md`](../HOW_TO_RUN_FPGA.md) for that build and hardware
-> verification procedure. The dated results below remain useful evidence, not
-> current sign-off data.
+Current physical implementation, utilization, static timing sign-off, and APR architecture for Ventium on the **RK-XCZU15EG-F** (`xczu15eg-ffvb1156-2-i`, AMD Vivado **2025.2**).
 
-Real Vivado out-of-context synth → place → route results for the Ventium `core`,
-with device views, the congestion analysis, and the config matrix. Summarized in
-the [README](../README.md#fpga-synthesis-kv260); full detail here.
+- **Public Release Build (`main`):** Self-contained 193-file hash-pinned closure (`fpga/known_good_c0e3fe43.json` & `fpga/build_known_good.py`), no private submodule required. See [`PUBLIC_FPGA_RELEASE_2026-11-14.md`](PUBLIC_FPGA_RELEASE_2026-11-14.md) and [`../HOW_TO_RUN_FPGA.md`](../HOW_TO_RUN_FPGA.md).
+- **Physical Layout Deep-Dive:** [`FPGA_PHYSICAL_MAP_2026-11-14.md`](FPGA_PHYSICAL_MAP_2026-11-14.md).
+- **Historical Bring-Up Note:** Earlier KV260 (`xck26-sfvc784-2LV-c`) OOC/Linux-carveout builds and `VEN_CACHE_HALF` experiments are retired history; all current images target **RK-XCZU15EG-F** with full P5 **8 KiB 2-way L1 I-Cache + 8 KiB 2-way 8-bank L1 D-Cache**, **32-entry 4-way I-TLB**, **64-entry 4-way D-TLB**, and outer L2 disabled.
 
+---
 
-The core + FPU are fully synthesizable. Below is the **real Vivado placement** of
-the `core` (out-of-context) on the KV260's **XCK26** (Zynq UltraScale+ ZU5EV,
-`xck26-sfvc784-2LV-c`), every placed leaf cell colored by its RTL module — the
-physical clusters (I-cache + the folded byte-window decode spine, FP datapath,
-branch predictor, the iterative FP engines, the core spine, …):
+## 1. Board-Qualified Release Image `c0e3fe43` (Nov 2026)
 
-![Ventium core placed on the KV260, colored by RTL module](fpga-device-view.png)
+Image **`c0e3fe43`** (`161` hardware defines, strategy `retime_muxf_route_first`) is the board-qualified release baseline:
 
-The byte-window decode muxes (`u_icache`, the `-flatten_hierarchy rebuilt` instance
-that absorbs the spine's 12×32:1 alignment fabric) are the **level-5 routing-congestion
-hotspot** — the bright band in the placement-density map (peak ≈ 340 cells / 4×4-tile bin):
+- **Post-Route Static Timing Sign-Off (`40.000 MHz` / `25.000 ns` core clock):** Closed at **`40.264133 MHz`** (**`WNS = +0.164 ns`**, **`WHS = +0.010 ns`**, `0` failing endpoints, `0` DRC/unrouted nets; `100.000 MHz` PS8/HP0 AXI4 clock `WNS = +5.691 ns`).
+- **Physical Standard Acceptance Suite (`U/V + fast-pipe`, `cycle_mode=1`):**
+  1. **CoreMark:** Both standard 4,000-iteration seeds pass with exact reference CRCs (`2.100128 / 2.106796 CM/MHz` at `40.000 MHz`).
+  2. **Windows 95 OSR2 GUI:** Cold boot to desktop, PS/2 mouse & keyboard multi-app session (Calculator `355/113`, Notepad, MS Paint), and clean shutdown.
+  3. **DOS Quake `timedemo demo1`:** Cold FreeDOS boot, **`969` frames in `121.2 s` (`8.0 FPS`)** at measured `39.999802 MHz` + interactive gameplay.
+- **Verified Physical Quake Gameplay IPC:** **`0.515778001` total U+V IPC** (`0.397847833` primary/U-only IPC, including `REP`-element retirement) across interior gameplay cycles **`28,696,827,616–32,989,404,795`** (`+3.88%` over prior release `2886d24c`'s `0.496499864` total U+V / `0.383002768` primary/U across cycles `625,021,130,428–629,480,208,865`).
+- **Empirical Single-Board Runtime DRP Overclocking (`ven_pll_ctrl` `MMCME4_ADV`, `100 MHz * 10 / N`):** Without rebuilding or reprogramming, `58.824 MHz` (`N = 17`) passed cold Win95 GUI + shutdown + Quake `demo1`, and `62.500 MHz` (`N = 16`) passed cold DOS Quake `demo1` (`11.6 FPS` wall-clock) + interactive `E1M1`. Static timing sign-off covers `40.000 MHz` (`N = 25`) only.
 
-![placement density — the byte-window MUXF congestion band](fpga-congestion-hotspot.png)
+---
 
-**Best numbers** — OOC `core`, `+VTM_NO_DPI`, 15 ns target. Two configs: the
-**verified production** config (narrowb, **bit-exact vs QEMU 75/75 + cycle bands**)
-and the predecoded µop-cache (`+VEN_UOPCACHE`), which deletes the byte-window
-decoder for a slot read.  The active implementation uses the full P5 8 KiB,
-2-way L1 geometry in both cases:
+## 2. Utilization & Hierarchical Breakdown (`xczu15eg-ffvb1156-2-i`)
 
-| Resource | narrowb (production) | `+VEN_UOPCACHE` | Available |
-|---|---:|---:|---:|
-| **CLB LUTs (synth)** | 93,883 (80.2 %) | **79,442 (67.8 %)** | 117,120 |
-| MUXF7 / MUXF8 | 14,311 / 6,216 | **11,101 / 4,181** | 58,560 / 29,280 |
-| CARRY8 | 2,119 | 1,861 | 14,640 |
-| DSP48E2 | 31 | 31 | 1,248 |
-| Block RAM | 0 | 40 | 144 |
-| **Fmax — logic only** | ~147 MHz (6.8 ns FP cone) | ~145 MHz | — |
-| **Fmax — placed** (WNS@15 ns) | 46.0 MHz | 52.4 MHz | — |
-| **Full route @ 15 ns** | ✗ does **not** route (42,392 overlaps) | ✅ **0 failed nets** | — |
-| **Fmax — routed** (real OOC) | — (congestion wall) | **51.7 MHz** | — |
+| Resource | `c0e3fe43` Used / Available | `c0e3fe43` % | Prior `2886d24c` | Delta |
+| --- | ---: | ---: | ---: | ---: |
+| **CLB LUTs** | `171,819 / 341,280` | **50.35%** | `186,086` (`54.53%`) | **−14,267 LUTs** |
+| **Occupied CLB Sites** | `30,703 / 42,660` | **71.97%** | `33,528` (`78.59%`) | **−2,825 CLBs** |
+| **CLB Flip-Flops** | `39,520 / 682,560` | **5.79%** | `55,190` (`8.09%`) | **−15,670 FFs** |
+| **Block RAM Tiles** (`276` RAMB36 + `3` RAMB18) | `277.5 / 744` | **37.30%** | `277.5` (`37.30%`) | `0` |
+| **DSP48E2 Slices** | `47 / 3,528` | **1.33%** | `47` (`1.33%`) | `0` |
+| **Routable Nets Connected** | `216,790 / 216,790` | **100.00%** | `224,099 / 224,099` | `0` errors |
 
-![byte-window MUXF density: narrowb vs predecoded µop-cache, shared scale](fpga-rebalance-compare.png)
+| Hierarchical Subsystem | Total LUTs | FFs | BRAM36 / DSP | Architectural Role |
+| --- | ---: | ---: | ---: | --- |
+| `u_fp_shared` (`ven_fp_top`, `ven_fp_trans`, `ven_fp_fxch_queue`, `fpu_srt_div`, BCD) | `72,204` | `10,596` | `2.5` / `38` | Shared pipelined 80-bit x87 FPU, polynomial transcendentals, SRT div/sqrt & FXCH rename |
+| `u_icache` (+ retimed front-end/decode cones) | `35,245` | `623` | `8` / `0` | 8 KiB 2-way L1 I-Cache + retimed fetch/prefix/decode muxes |
+| `u_regfile` (+ integer bypass/forwarding muxes) | `23,516` | `256` | `0` / `0` | 32-bit multi-port GPR file, segment caches & U/V operand forwarding |
+| `core` spine + `u_bpred_btb` + `decode_stages` + `u_idiv` | `11,754` | `10,584` | `0` / `9` | Dual-issue U/V `S_PIPE`, microsequencer, dual-port 256-entry BTB & radix-2 divider |
+| `u_l1axi` (`ven_l1d` + `ven_p54_hit_return` + `ven_axi_master`) | `8,412` | `2,105` | `0` / `0` | 8 KiB 2-way 8-bank dual-port-read L1 D-Cache & 64-bit AXI4 master |
+| `u_dtlb` + `u_itlb` + `u_fe_itlb` + `u_fe_dtlb` | `8,223` | `4,780` | `0` / `0` | 64-entry 4-way D-TLB, 32-entry 4-way I-TLB & registered front-end page filters |
+| `ao486` PC/AT Peripherals (`vga`, `sound`, `floppy`, `dma`, `ide`, ...) | `8,280` | `5,126` | `136.5` / `0` | MiSTer PC/AT chipset, VGA plane RAMs, SB16/OPL3 & bypassed outer L2 wrapper |
+| Platform Infrastructure (`u_ddr`, `u_mgmt`, `u_dbg`, `u_clkdiv`, `u_video_capture`, BD) | `4,185` | `5,450` | `130` / `0` | 16-slot posted DDR4 bridge (`ven_ddram_axi_posted`), MMCM DRP controller, 128-RAMB36 VGA capture & AXI CDC/upsizer |
 
-**The headline APR result:** at a 15 ns target the **predecoded µop-cache routes cleanly to a
-real 51.7 MHz** (0 failed nets, routed WNS −4.35 ns) — while the production byte-window config
-**cannot route at all** (the router gives up with 42,392 congestion overlaps). The µop-cache is
-the **first config to route the design legally at a tight clock**, vs the prior ~35–42 MHz
-*estimate*.  The µop-cache keeps a conservative fallback for an unavailable or
-incomplete predecode, and `+VEN_UOPCACHE_CHECK` is a simulation-only assertion
-that compares every issued resident slot with the live decoder.  It is a
-diagnostic complement to, not a replacement for, the differential gates.  The
-**narrowb config is the verified-bit-exact 75/75 production build**.
+---
 
-- **Area — the FP datapath shrink ([`TIMING_PROBLEMS.md`](../fpga/TIMING_PROBLEMS.md) P0-13):
-  −9,635 LUT (−10.7 %), bit-exact.** `fx_to_int_ex` (the FP→int conversion under FIST +
-  FBSTP) carried a 128-bit barrel shifter where only 64 bits are ever non-zero — narrowing
-  it bit-exactly (verified `make verify` 75/75) halved it across all five FIST/FBSTP
-  instances (−8,636), plus a shared-round `f_eval` split (−999). The mantissa multiply was
-  already in DSP (16 of 31 DSP48s), so it was never the LUT cost. Earlier wins: iterative
-  FDIV/FSQRT/integer-DIV/FBSTP/FBLD engines + LUTRAM/BRAM caches brought the as-is 518 %
-  single-cycle datapath under the device.
-- **The predecoded µop-cache (P0-11) is the first lever to *reduce* the byte-window MUXF**
-  (−22 % F7 / −33 % F8) instead of relocating it — by running the decoder on the multi-cycle
-  fill walk and reading fixed-width µops by slot (the textbook P6/Sandy-Bridge fix; the user's
-  "predecode prefixes 1 byte/cycle, pipeline the SIB length" insight). The *placer's* congestion
-  level still reads level-5 (its density estimate is diffuse across the coupled front-end —
-  BTB 23 %, icache 18 %, slow-path decoder 13 %, …), but that metric is misleading: the **actual
-  router converges (0 overlaps) for the µop-cache and not for narrowb (42,392)** — the lower MUXF
-  gives the router the channels it lacked. The route is the judge ([P0-14](../fpga/TIMING_PROBLEMS.md)).
-- **Fmax: the design is routing-congestion-bound, not logic-bound.** The worst path is the FP
-  deferred-commit cone `fpp_reg → fpr` at ~6.8 ns *logic* (≈147 MHz) but **65 % routing** — the
-  byte-window/front-end MUXF cluster has no spare channels. Placed: **46.0 MHz (narrowb) /
-  52.4 MHz (µop-cache)**. A full Vivado strategy sweep (P0-9: `-muxf_remap`, AltSpreadLogic,
-  AlternateRoutability, the congestion strategies) closes **none** of it — an architectural
-  property of the single-cycle x86 byte-window decode, not a tooling choice.
-- **The honest path to 66 MHz** (P0-12): the OOC placer has no PS8 anchor / floorplan, so it
-  smears the whole `eip`-coupled front-end into one clock region. The cure for *diffuse-coupled*
-  congestion is **in-context place + floorplan** (spread the cluster across regions near the
-  PS8) — the real-chip number we must measure to ship — or a lower-utilization / higher-grade
-  device. A **2-stage FP execute pipeline** (`+VEN_FP_PIPE`) and a **BTB-update pipeline**
-  (`+VEN_BTB_PIPE`) keep FP + branch-predict off the critical path with **both FP and
-  branch-mispredict cycle bands bit-identical**.
+## 3. Physical Floorplan, Congestion Relief & Critical Path
 
-### On a larger device (ZU15EG): the verified production config routes
+![Colored component CLB utilization map of Ventium image c0e3fe43](fpga-physical-c0e3fe43/clb-hierarchy-compact.png)
 
-The **same verified `narrowb` production RTL**, OOC on a **Zynq UltraScale+ ZU15EG**
-(`xczu15eg-ffvb1156-2LV-e`, same `-2LV` speed grade as the KV260, but ~3× the fabric:
-341,280 LUTs), placed by module:
+![Routing congestion map of Ventium image c0e3fe43](fpga-physical-c0e3fe43/routing-congestion.png)
 
-![Ventium core placed on the ZU15EG, colored by RTL module](fpga-device-view-zu15eg.png)
+### How `c0e3fe43` Closed 40 MHz STA Over `2886d24c`
 
-**The headline:** at the *same* 15 ns target, the production `narrowb` config — which is
-**bit-exact-verified but cannot route on the KV260** (42,392 congestion overlaps, router
-gives up) — **routes cleanly on the ZU15EG** (router converges: **0 overlaps, 0 unrouted
-nets**). The 3× routing fabric gives the byte-window front-end the escape channels it lacks
-on the small part. This is the first clean route of the *verified* build at a tight clock.
+Prior image `2886d24c` routed legally and ran at 40 MHz on bench silicon, but slow-corner Vivado STA reported `WNS = -9.841 ns` (`28.702 MHz`) due to regional `u_icache` / decode MUXF congestion (`90.37%` peak) and a `3,024`-sink `pf_fill_addr` broadcast tree. `c0e3fe43` closed timing via two coupled changes:
 
-| Resource | KV260 `narrowb` (XCK26 / ZU5EV) | **ZU15EG `narrowb`** (`xczu15eg-…-2LV`) |
-|---|---:|---:|
-| CLB LUTs | 93,883 (**80.2 %** of 117,120) | 93,961 (**27.5 %** of 341,280) |
-| CLB Registers | 28,675 | 29,394 (4.3 %) |
-| MUXF7 / MUXF8 | 14,311 / 6,216 | 14,312 / 6,216 |
-| CARRY8 / DSP48E2 / BRAM | 2,119 / 31 / 0 | 2,119 / 31 / 0 |
-| Placer congestion | level 6 (wall) | level 5 (local, `u_icache` byte-window) |
-| **Full route @ 15 ns** | ✗ **does not route** (42,392 overlaps) | ✅ **routes — 0 overlaps / 0 unrouted** |
-| Fmax — placed (WNS@15 ns) | 46.0 MHz | 51.1 MHz (WNS −4.56 ns) |
-| **Fmax — routed (real OOC)** | — (never routed) | **40.6 MHz** (WNS −9.60 ns) |
+1. **RTL Fanout & Mux Narrowing:** Replicated `pf_fill_addr_rep[0..3]` across the I-cache fill banks and narrowed `ic_res_line_base` alignment muxing without adding fetch latency.
+2. **`retime_muxf_route_first` Vivado Flow:** Combined `Flow_PerfOptimized_high` synthesis (`GLOBAL_RETIMING = on`), `opt_design -muxf_remap` (collapsing wide byte-window `MUXF7`/`MUXF8` trees that pinned LUTs into dense slices), `place_design -directive AltSpreadLogic_high`, `phys_opt_design -directive AggressiveExplore`, and `route_design -directive AlternateCLBRouting`.
 
-The routed **40.6 MHz** is the honest critical-path number — lower than the placer's 51 MHz
-*estimate* because actually wiring the congested byte-window region costs real routing delay,
-and lower than the ~148 MHz logic-only ceiling (the FP cone is **6.74 ns**). The placer still
-flags **level-5 congestion local to `u_icache`** even on the big device — confirming the wall
-is the **single-cycle x86 byte-window decode itself**, an architectural property, not a device
-or tooling limit. The bigger part buys *routability* (and a clean, shippable bitstream path),
-not a dramatically higher clock; closing toward 66 MHz still needs the µop-cache front-end
-([P0-11](../fpga/TIMING_PROBLEMS.md)) and in-context floorplanning ([P0-12](../fpga/TIMING_PROBLEMS.md)).
+Resulting physical metrics on `c0e3fe43`:
+- **Final Global Congestion (`>=85%`):** **`0` windows** (`22.45%` vertical / `21.05%` horizontal global routing utilization, down from `28.32%` / `27.54%` on `2886d24c`).
+- **Worst Setup Path:** `u_core/q_pc_reg[2]/C` → `u_l1d/u_pair_return/data_q_reg[1][21]/D` — **`24.522 ns`** data delay (`6.836 ns` logic + `17.686 ns` route, `76` logic levels), **`+0.164 ns` slack** at `25.000 ns` (`40.264133 MHz`).
 
-Reproduce — KV260: `CONFIG=narrowb MODE=full vivado -mode batch -source fpga/scripts/apr_run.tcl`;
-ZU15EG: prepend `PART=xczu15eg-ffvb1156-2LV-e OUTTAG=_zu15eg`. Then
-`python3 fpga/scripts/render_device_view.py …` / `render_congestion.py` / `render_compare.py`.
-Full timing backlog + methodology in [`fpga/TIMING_PROBLEMS.md`](../fpga/TIMING_PROBLEMS.md).
+---
 
-### Retired half-cache experiment: congestion relief ≠ higher Fmax
+## 4. Experimental Branch APR Status (`experimental/uv-fast-ipc-apr`)
 
-This is historical evidence from an experiment that halved both L1s to **4 KB**
-(64 sets / 21-bit tag instead of 128 / 20) to test whether `u_icache`
-congestion was the Fmax wall. The experiment was functionally bit-exact but
-not cycle-faithful because the fixed-128-set oracle sees a different miss
-sequence. The implementation no longer recognizes the half-cache build
-switch: every current image uses the full P5 8 KiB/2-way L1s. The data below
-is retained for the diagnosis, not as a reproduction recipe.
+On `experimental/uv-fast-ipc-apr`, post-`c0e3fe43` experimental RTL additions increase core/cache logic weight relative to the frozen `main` release. Fresh APR exploration on that heavier experimental tree concluded with legal MUXF-remapped routed checkpoint **`5c630403`** at **`35.736 MHz`** post-route STA (`WNS < 0` against 40 MHz) and remains **unmeasured on physical Quake gameplay** (see [`FPGA_APR_STRATEGIES_2026-10-17.md`](FPGA_APR_STRATEGIES_2026-10-17.md)). Do not substitute experimental checkpoints for `c0e3fe43` sign-off or overwrite `experimental/uv-fast-ipc-apr` working RTL with the frozen release snapshot.
 
-![Ventium KV260 µop-cache + half-cache, placed by module](fpga-device-view-kv260-halfcache.png)
+---
 
-| Metric (routed OOC, KV260, 15 ns) | µop-cache **full** (8 KB) | µop-cache **half** (4 KB) | Δ |
-|---|---:|---:|---:|
-| `u_icache` placed cells | 30,413 | 16,616 | **−45 %** |
-| F7 / F8 muxes | 11,101 / 4,181 | 7,906 / 3,192 | **−29 % / −24 %** |
-| CLB LUTs | 79,722 | 77,547 | −2.7 % |
-| BRAM tiles | 40 | 40 | 0 |
-| Placer congestion | **level 6** (`u_icache` 86–96 %) | **level 5** (`u_icache` 87 %, now sharing with FP/BTB) | ↓ one level |
-| Failing endpoints / TNS | 21,095 / −51,509 ns | **16,221 / −32,019 ns** | **−23 % / −38 %** |
-| **Fmax — routed** | **51.7 MHz** (WNS −4.35 ns) | **50.1 MHz** (WNS −4.94 ns) | ≈ flat |
+## 5. Reproducing Synthesis, Implementation & Floorplan Maps
 
-**The finding is the point:** halving the cache does exactly what it should to *congestion*
-— `u_icache` cells −45 %, the F7/F8 read-mux trees −25–29 %, placer level 6 → 5, and the
-**bulk** of timing improves sharply (failing endpoints −23 %, TNS −38 %). But routed
-**Fmax barely moves** (51.7 → 50.1 MHz, within placement noise), because the **worst path is
-not the cache** — it is the FP deferred-commit cone `fpp_b_reg[66] → u_fpu_state/fpr_reg`,
-which the smaller cache doesn't touch. So the icache congestion gates *routability and the
-endpoint tail*, while the *single critical path* is FP-datapath-bound. Closing toward 66 MHz
-needs the FP cone pipelined, not less cache.  The cache reduction was a diagnostic only and is
-deliberately not retained: `VEN_CACHE_HALF` is rejected at elaboration and no current build
-recipe accepts `HALF=1`.
+All Vivado launches must run as a **single process family** via `fpga/run_vivado_exclusive.sh` with scratch outputs under `/home/yukidama/external/tmp` (never run concurrent Vivado sessions or write build products into the repo tree):
 
-### Historical half-cache checkpoint: the 2-stage FP commit (`+VEN_FP_PIPE2`)
+```bash
+# Public known-good preflight + fresh Vivado 2025.2 build (on main):
+python3 -B fpga/build_known_good.py --check
+tclsh fpga/test_known_good_wrapper.tcl "$PWD"
 
-This retired checkpoint established that the Fmax wall is the FP deferred-commit
-cone, not cache capacity.  It is retained only to document that finding; no
-current implementation or FPGA recipe uses its reduced-cache geometry. Every leaf
-cell of the historical **63 MHz** build, colored by RTL module (luminance =
-sub-block):
+TMPDIR=/home/yukidama/external/tmp \
+python3 -B fpga/build_known_good.py --build \
+  --vivado-root /opt/AMD/2025.2/Vivado \
+  --output /home/yukidama/external/tmp/ventium-c0e3fe43-build
 
-![Ventium core on the KV260, half-cache + FP_PIPE2, routed 63 MHz](fpga-device-view.png)
-
-**The lever — measured, not guessed.** A timing-driven P&R sweep over this historical
-checkpoint (one synth, many place/route directives, all over-constrained @ 15 ns) lifts
-the routed Fmax from the production congestion directives' **50.1 → 52.6 MHz**
-(`ExtraNetDelay_high` place + `Explore` route) — but no directive, Pblock, or retiming
-clears the wall, because the binder is **logic depth, not routing**: the deferred FADD
-commit runs the *entire* `f_eval` (`f_eval_s1` front → `f_eval_s2` round-pack) in one
-clock — a **latency-1, ~80-level / ~43-CARRY8** cone `fpp → fx_round_pack → fpr`. P&R can
-only redistribute route delay on it; retiming can't split a latency-1 path (one register
-layer, nothing to balance); synthesis itself caps at 59.4 MHz.
-
-`+VEN_FP_PIPE2` splits the cone. It inserts **one register** (the `fx_pipe_t` carrier) at
-the `f_eval_s1`/`f_eval_s2` boundary, so the fast-arm commit becomes two clocks — `s1` at
-N+1, the round-pack + `fpr` write at N+2. The key enabler is that the **FP scoreboard
-already publishes the result at issue+latency (FADD = 3)** independent of when the deferred
-commit physically writes `fpr` (`core.sv`): the commit moves N+1 → N+2, still ≤ issue+3, so
-every dependent reads the value in time. That makes it **cycle-safe by construction** — not
-a cycle-model change:
-
-| Check | Result |
-|---|---|
-| `make verify` (default build, no `VEN_FP_PIPE2`) | **GREEN** — default byte/cycle-identical |
-| A/B cycle trace, `mb_faddchain` (`make verify-fppipe2`) | **byte-identical** to the validated 1-stage |
-| A/B `mb_fpindep` | **identical final arch state**; +0.09 % cyc (in M5 band) |
-| M5 FP cycle bands (faddchain CPI ~3, fpindep < that) | **held** |
-| 1M-vector `f_eval_s2∘f_eval_s1 == f_eval` | **bit-exact** |
-
-The historical result (same 15 ns target, reduced-cache µop-cache base):
-
-| Metric (routed OOC, KV260) | half (1-stage `VEN_FP_PIPE`) | half **`+VEN_FP_PIPE2`** | Δ |
-|---|---:|---:|---:|
-| CLB LUTs (synth) | 77,975 (66.6 %) | 76,700 (65.5 %) | −1.6 % |
-| CLB Registers | 25,565 | 25,838 | +273 FF (the pipe reg) |
-| CARRY8 / DSP / BRAM | 1,862 / 31 / 40 | 1,866 / 31 / 40 | ≈ 0 |
-| **Fmax — synth** (WNS@15 ns) | 59.4 MHz | **78.4 MHz** | **+32 %** |
-| **Fmax — routed** | 52.6 MHz (best directive) | **63.0 MHz** | **+20 %** |
-| Worst path | `fpp → fx_round_pack → fpr` | `u_bcd` (BCD/FBSTP engine) | cone gone |
-
-So the FADD cone leaves the critical path entirely (synth 59→78 MHz), and the routed build
-clears **60 MHz at 63.0** — the worst path is now the rare iterative **BCD engine** (`u_bcd`,
-FBLD/FBSTP), with the µop-cache `store_bmap → eip` fill path just below it. Cost: ~**+273
-flip-flops** (one `fx_pipe_t` stage register), LUT-neutral. The default build is untouched —
-all new logic is under `ifdef VEN_FP_PIPE2`. Reproduce: `STAGE=synth FP_PIPE2=1` then
-`STAGE=pnr FP_PIPE2=1 STRAT=fp2_timingopt PLACE_DIR=ExtraTimingOpt ROUTE_DIR=Explore vivado
--mode batch -source fpga/scripts/apr_hc_pnr.tcl`; cycle-safety via `make verify-fppipe2`.
-
-#### Next worst path: the BCD step (÷100, not two ÷10) → 65.3 MHz
-
-With the FADD cone gone, the `u_bcd` engine (FBSTP, FP→packed-BCD) becomes the worst path:
-its per-clock step ran **two chained divide-by-10** (`q/10` then `q1/10`), ~54 levels / ~41
-CARRY8 in series. Computing **one divide-by-100** instead and taking the two low digits from
-`q%100` (a 0..99 value → a 7-bit extract) halves that cone — **bit-exact and cycle-neutral**
-(same 2-digits/clock cadence, `make verify-bcd` 40 k vectors). Synth rises **78.4 → 80.6 MHz**
-and the binder moves to the FP_PIPE2 stage-1 front (`fpp → fpp2_s1`). Routed, with
-`ExtraNetDelay_high` placement (the right placer once the wall is route-bound), the historical
-build reaches **65.3 MHz** — the worst path now the **µop-cache fill → front-end cluster**
-(`store_bmap → eip`/`ic_age`/`store_slots`, 64–73 % routing). That cluster is route-bound and
-**placement-variable** (45–65 MHz across directives; `ExtraTimingOpt` and forced fanout
-replication both place it worse) — the diffuse front-end congestion that P0-12 (in-context
-floorplan) targets, not a single combinational cone. Reproduce: `STAGE=pnr FP_PIPE2=1
-STRAT=fp2b_netdelay PLACE_DIR=ExtraNetDelay_high ROUTE_DIR=Explore`; `make verify-bcd`.
-
-> The ÷100 step is now **opt-in (`+VEN_BCD_DIV100`)**: it only helps when `u_bcd` is the worst
-> path (this historical OOC configuration), and in the full SoC below the front-end cluster binds long
-> before `u_bcd` does — so the default leaves it off (back to two chained ÷10), keeping `u_bcd`
-> smaller where it isn't critical. Both forms are bit-exact (`make verify-bcd` either way).
-
-## Full SoC, in-context: the front-end pipeline (`+VEN_FE_PIPE`) → the deployable image
-
-Everything above is **out-of-context** (the `core` alone, virtual I/O). The deployable image is
-the **full KV260 block design**: the core + FPU wrapped with the **L1/AXI memory subsystem**
-(`ventium_l1_axi`: `ven_l1d` → `ven_axi_master` → AXI4 to PS-DDR), the **`ven_soc_axil`** PS↔PL
-control / port-I/O bridge, and the SmartConnect interconnect — all placed *in context* against the
-PS8 hard block and routed to a **bitstream + `.xsa`** at a 60 MHz `pl_clk0` target
-(`fpga/scripts/impl_kv260_soc.tcl`). The in-context routing demand is much higher than OOC, and a
-new module (the front-end translate path) binds.
-
-**The dcache-timing removal (prerequisite).** Under `VEN_L1_AXI` the old `dcache_timing` block
-(~4.4 k cells) only fed the cycle-mode D-miss penalty, which `real_bus` suppresses — it never
-touches data. Gating it out (`ifndef VEN_L1_AXI`) is inert (default build identical) and drops the
-post-place LUT congestion **79 % → 76 %**. Necessary, not sufficient: it does not, by itself,
-route.
-
-**The wall, and the cut.** With dcache-timing gone the full SoC still would **not legally route**
-at 60 MHz — Vivado abandons routing with *"Design is not legally routed. There are 8766 node
-overlaps."* The binder is the `eip` fetch cone: every fetch re-runs the 16-entry I-TLB
-carry-chain compare (`itlb hit_of → xlate_miss → eip`) combinationally, and in context that cone's
-fanout congests the front-end region past what the router can resolve. **`+VEN_FE_PIPE`** breaks
-it with a **page-keyed micro-TLB**: a 1-entry register (`fe_itlb_q`/`fe_dtlb_q`) keyed on
-`cur_lin[31:12]` holds the resolved translation for the current 4 KiB page, so steady-state fetch
-reads a registered phys page instead of re-walking the TLB compare. A page crossing asserts
-`fe_xlate_pend` for exactly **one clock** while the register re-samples (the only added latency;
-zero within a page, zero in real mode). It is `ifdef`-gated — default build byte/cycle-identical,
-`make verify` GREEN — and an **Fmax-only demonstrator** (cycle bands not claimed with it on, since
-the page-crossing stall perturbs cycle counts by < ~1 %; architecturally bit-exact throughout).
-
-The same SoC, same 60 MHz target, the cut on vs off:
-
-| Full-SoC impl (in-context, KV260, `pl_clk0` 60 MHz) | dcache-removal only | **`+VEN_FE_PIPE`** |
-|---|---|---|
-| Route result | **FAILED** — 8766 node overlaps (illegal) | **Router Completed Successfully** |
-| WNS @ 60 MHz | — (never closed) | **−3.195 ns** |
-| **Routed Fmax** | — (~41 MHz wall, no legal route) | **~50.4 MHz** |
-| CLB LUTs | — | 83,117 (71.0 %) |
-| CLB Registers / BRAM / DSP | — | 31,178 (13.3 %) / 40 / 31 |
-| Bitstream + `.xsa` | not produced | **produced** (deployable) |
-
-So `+VEN_FE_PIPE` takes the full SoC from *no legal route at all* to a clean **~50 MHz** image —
-the `eip`/TLB translate cone leaves the critical path exactly as designed. The **new** worst path
-is `u_uopcache/store_bmap → eip_reg[26]` (19.81 ns, **62 % routing** / 38 % logic, 47 levels) — the
-*same* µop-cache fill→front-end cluster the OOC 65.3 MHz build hit. The remaining wall is therefore
-**route-bound, not logic-bound** — diffuse fill→`eip` routing congestion at ~68–71 % LUT, not a cone
-P&R or floorplanning can shorten.
-
-**Decision history: 60 MHz dropped as infeasible; 50 MHz closed; the F3 boot-ISA growth then
-moved the deployable to 40 MHz.** The OOC core ceiling is 65.3 MHz, but the full SoC's extra
-L1/AXI + BD interconnect spends the margin, and the residual congestion is diffuse (not a single
-cone), so no realistic in-context floorplan closes 60 on this small ZU5EV die. The `+VEN_FE_PIPE`
-build first closed **50 MHz** (WNS +0.19 ns — razor thin). The F3 real-mode decode work (16-bit
-ModR/M EA, FF-group far transfers, SS-defaults, a16 string semantics) then grew the decoder
-enough that the same high-fanout `u_uopcache/store_bmap` net routes ~3.5 ns slower and 50 MHz
-stopped closing (WNS −3.2 ns). `pl_clk0` is now **40 MHz** (`PL0_MHZ`, `impl_kv260_soc.tcl`),
-which routes with margin. A larger part (the ZU15EG, which clears the OOC build comfortably)
-would hold 60+; on the K26, **40 MHz is the deployable we keep** — with `sw/ps/ven_soc_app/
-venclk.sh` as the PS-side silicon-margin probe (steps the PL0 divider 40→50 MHz with a
-gate-proven firmware smoke test per step).
-
-**Historical deployable checkpoint** (`fpga/build/kv260_soc_impl_linux_40/`, an earlier SD-card
-image — uop-cache + IC-BRAM + reduced-cache + FP_PIPE2 + FE_PIPE + L1_AXI + the PS→core IRQ
-seam, with `REMAP_BASE=0x4000_0000`): routed at the 40 MHz target with **WNS +0.104 ns / WHS +0.008 ns, 0
-failing endpoints** — CLB LUTs **94,712 / 117,120 (80.9 %)**, registers 31,208 (13.3 %), BRAM 40
-(27.8 %), DSP 31 (2.5 %), CLB occupancy 98.3 %. The device views below are rendered from this
-routed checkpoint.  It must not be used as a current build recipe: all current images use the
-full P5 8 KiB/2-way L1 configuration.
-
-Every leaf cell of the routed full SoC, colored by RTL module (core blocks + the L1/AXI + PS-bridge
-+ BD interconnect that OOC views omit):
-
-![Ventium full SoC on the KV260, routed @ 40 MHz, colored by module](fpga-device-view-soc.png)
-
-The two halves separated — the CPU core + FPU (memory/BD grayed), and the memory/PS/BD outside it
-(core grayed):
-
-![Full SoC — CPU core + FPU highlighted](fpga-device-view-soc-core.png)
-![Full SoC — L1/AXI memory + PS bridge + BD highlighted](fpga-device-view-soc-outside.png)
-
-Placement density and router-congestion concentration of the routed image — the bright band is the
-µop-cache fill→`eip` front-end cluster that now binds:
-
-![Full SoC — placement density](fpga-congestion-soc.png)
-![Full SoC — router congestion concentration](fpga-congestion-router-soc.png)
-
-Reproduce: `FE_PIPE=1 OUTTAG=_fe /tools/Xilinx/2025.2/Vivado/bin/vivado -mode batch -source
-fpga/scripts/impl_kv260_soc.tcl` (bitstream + `.xsa`); device views + congestion from the routed
-checkpoint via `DCP=<...>_routed.dcp OUT=<...> vivado -mode batch -source fpga/scripts/soc_views.tcl`
-then the `render_device_view.py` / `render_congestion*.py` scripts.
+# Offline floorplan & congestion map regeneration (no Vivado needed):
+python3 fpga/scripts/render_device_view.py \
+  --data docs/fpga-physical-c0e3fe43/physical-map.json.gz \
+  --image-id c0e3fe43 \
+  --output /home/yukidama/external/tmp/ventium-maps
+```

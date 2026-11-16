@@ -1,63 +1,40 @@
-# Cold diagnostic lifecycle — October 10
+# Cold-Boot Ownership, Reset & Posted-DDR4 Drain Lifecycle
 
-The prepared controller had a failure-path ownership bug: its sampling loop
-checked systemd InvocationID, but cleanup stopped a service by name and then
-reset/switched the board clock. A replacement invocation could therefore be
-killed and have its hardware state reset. MMIO/guest-map and startup receipt
-failures were also outside the cleanup block; recorder timeout could leave a
-live recorder during final HALT/RAM capture.
+This note documents the board-side supervision, reset, and posted-DDR4 drain lifecycle for cold-booting physical workloads (CoreMark, FreeDOS/Quake, and Windows 95 OSR2) on **RK-XCZU15EG-F** (`xczu15eg-ffvb1156-2-i`).
 
-`ven_cold_owners.py` admits an exact service Id, InvocationID and native MainPID.
-Every stop/signal is checked before and after. Closure requires PID zero and
-no remaining tasks. A cleared InvocationID is admitted only after this helper's
-own successful synchronous stop. Failure on one owner still attempts cleanup
-of the other known owner; an unknown or replaced owner is never adopted.
+> **Current Hardware Qualification (`c0e3fe43`, 2026-11-14):** Image **`c0e3fe43`** (`40.264133 MHz` STA-signed-off, `161` defines, `cycle_mode = 1'b1`) passes all three standard-suite gates from cold reset on physical hardware. Verified interior DOS Quake gameplay IPC is **`0.515778001` total U+V** (`0.397847833` primary/U-only, including `REP`-element retirement) across cycles **`28,696,827,616–32,989,404,795`**. Host lifecycle tests validate supervision invariants only and do not qualify CPU correctness or performance.
 
-`ven_cold_watch.py` puts mapping/start publication inside cleanup coverage,
-handles SIGTERM/SIGINT as stop requests, checks recorder native completion and
-reaps both workers before final debug/RAM operations. Identity failure refuses
-reset and clock writes, retaining an explicit failure receipt. It does not
-manufacture a zero IPC on an invalid observation or claim timedemo acceptance.
+---
 
-`ven_cold_start.py` checks identities through watcher handoff and closes an
-admitted watcher first on startup failure. The launcher itself never switches
-the clock or resets hardware from an incompletely owned failure path. A failed
-handoff leaves an explicit **requires inspection** receipt, not a success.
+## 1. Hardware Reset, DDR4 Reservation & External-Drain Contract
 
-## Verification and limits
+1. **Reserved Guest DDR4 (`0x6000_0000–0x6FFF_FFFF`):** Linux must reserve the 256 MiB `no-map` aperture before any PL programming or daemon startup (`HOW_TO_RUN_FPGA.md`).
+2. **Posted DDR4 Survives Guest Reset (`ven_ddram_axi_posted.sv`):** The 16-slot posted DDR4 write queue and CAM read-after-write bypass intentionally survive `soc_reset` so accepted AXI writes complete cleanly on `S_AXI_HP0_FPD` (`128b @ 100 MHz`) rather than tearing burst protocol. Before reprogramming PCAP, switching the MMCM divider (`ven_pll_clock.py`), inspecting final guest RAM/disk, or starting a new cold run, software **must** hold guest reset and verify external drain completion (`0x50440003`, matching `ven_posted_reset_guard.h` and hardware `pll_safe`).
+3. **Cache & Counter Reset Semantics:** Asserting management guest reset drives `soc_reset`, initiating a full tag/LRU clear walk while `CPU_BUSY` blocks requests. Across cold boots without PCAP reprogramming, the debug bridge's cumulative **primary/U** counter persists while `ventium_top.retire_n` (**total U+V**, debug selectors `76/77`) resets to zero.
+4. **Cold Admission Preflight (`ABI 5`):**
+   - `ven_cold_clock.py` verifies held guest reset, reset `CR0` (`0x6000_0010`), cleared forensic freeze, unchanged retirement baseline, and a read-time-bounded **`39.5–40.5 MHz`** core clock over 5 seconds without writing any register.
+   - `ven_board_probe.py prepare-cold` verifies those preconditions before any write, requests manual halt, clears/disables hardware breakpoints, and disarms forensic freeze comparators while keeping guest reset held.
+   - Start passive VGA capture (`ven_record_stream.py`) and any hosted PS/2 service (`ven_ps2_service.py`) **before** releasing guest reset (`ven_board_probe.py run`), and require natural daemon exit so guest stdio/sector buffers flush before reading the closed disk image.
+
+---
+
+## 2. Systemd Service Ownership Guards (`fpga/board-tools/ven_cold_*.py`)
+
+Stopping a board unit by name without checking `InvocationID` can accidentally kill a replacement run or reset hardware out from under another controller. The cold supervision helpers enforce strict invocation ownership:
+
+- **`ven_cold_owners.py`:** Binds each managed unit's exact `Id`, `InvocationID`, and native `MainPID`. Every signal/stop re-verifies ownership before and after; closure requires `MainPID == 0` and zero remaining cgroup tasks (`TasksCurrent`). Unknown or replaced invocations are never adopted or killed.
+- **`ven_cold_watch.py`:** Encloses MMIO/RAM mapping and startup-receipt publication inside the cleanup handler, treats `SIGTERM`/`SIGINT` as orderly stop requests, verifies native recorder exit, and reaps all owned workers before final debug/RAM inspection. On an ownership mismatch, it refuses to write reset or PLL registers and records an explicit failure receipt rather than fabricating `0` IPC.
+- **`ven_cold_start.py`:** Verifies worker identities through watcher handoff and stops an admitted watcher first on startup failure, leaving an explicit `requires inspection` receipt without mutating clocks or resets from a partially owned state.
+
+> **Supervision Caveat:** Systemd property reads and signals are not atomic transactions, and `SIGKILL`/power loss bypass Python `finally` blocks. Exclusive board ownership, unique unit names, and fresh reset/drain verification remain mandatory before every hardware run.
+
+---
+
+## 3. Host Regression Suite
+
+Run the 36 host unit tests covering ownership binding, watcher cleanup, launcher failure handoff, and held-reset clock admission (uses mocked systemd/MMIO; touches no board state):
 
 ```sh
-python3 -B -m unittest discover -s fpga/board-tools -p 'test_ven_cold_*py' -v
+TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
+  python3 -B -m unittest discover -s fpga/board-tools -p 'test_ven_cold_*py' -v
 ```
-
-All **36 tests pass**: 12 ownership, 10 tests executing the real watcher's
-cleanup/selected try paths, 7 executing the real launcher's failure cleanup,
-and 7 existing held-clock tests. Six original tests execute the prepared
-watcher's sampling block and also pass. These are host tests with fake services
-and MMIO, not full physical systemd/MMIO integration tests.
-
-A bounded actual host user-service check confirmed synchronous stop behavior:
-InvocationID clears, MainPID becomes zero and TasksCurrent becomes `[not set]`;
-repeated closure checks pass. Receipt:
-`external/tmp/ventium-cold-owner-native.jTEHr571/result.json`. No board MMIO
-was accessed by that check.
-
-The new immutable 14-file runtime package is
-`external/tmp/ventium-posted16-cold-package-r3.a8URqYr9/`. Its preparation
-verifies every old r2 input hash, preserves unchanged bytes, substitutes
-`watch_cold.py`/`start_once.py` from these repo files and adds the owner helper.
-The historical r2 package is unchanged. `prepared.json` and both test logs
-record pins/results; no upload, guest launch or bitstream admission is implied.
-The retained historical `stage_helpers.py` must not be rerun over this package.
-
-These identity checks are **not atomic systemd transactions**. Exclusive board
-and unique service-name ownership remain required. A launcher failure after a
-child starts but before its identity is published can leave an unobserved,
-bounded child requiring inspection; do not blindly kill its unit by name.
-SIGKILL, power loss and kernel faults cannot run Python cleanup. Recheck actual
-native services and held reset before any later hardware write/retry.
-
-Latest verified gameplay remains **0.50058134 total U+V retirement-event IPC**,
-model `86731249`, clocks 3.6B–3.7B; the complete 1.2B–3.7B average is
-**0.4788804468**. This predates `958f7ec4` and the C1/FST candidates, which have
-no gameplay result. Lifecycle tests neither improve nor qualify CPU performance.

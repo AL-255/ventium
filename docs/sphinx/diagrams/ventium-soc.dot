@@ -1,60 +1,62 @@
-// Ventium SoC — drawn in the Pentium-manual block-diagram style (top-down,
-// square boxes, orthogonal connectors) to match the core diagram. The core sits
-// on the memory bus and the PMIO I/O bus; the ven_* peripheral models tap the
-// PMIO bus, and device IRQs funnel through the 8259A PIC to the core.
+// Ventium RK-XCZU15EG-F PC/AT SoC — MiSTer ao486 platform + 16-slot posted DDR4
+// bridge + MMCM DRP clock controller + 0xA000_0000 AXI-Lite debug/PMU aperture.
 digraph ventium_soc {
   rankdir=TB;
   splines=ortho;
   graph [fontname="Helvetica", fontsize=13, labelloc=t,
-         label="Ventium SoC — core + PC-platform peripherals (ventium_soc.sv)",
-         bgcolor="white", nodesep=0.30, ranksep=0.55];
+         label="Ventium SoC on RK-XCZU15EG-F — MiSTer PC/AT Platform & Posted DDR4 (c0e3fe43)",
+         bgcolor="white", nodesep=0.28, ranksep=0.52];
   node  [shape=box, style=filled, fontname="Helvetica", fontsize=10,
          color="black", fillcolor="white", penwidth=1.1, margin="0.10,0.07"];
   edge  [fontname="Helvetica", fontsize=9, color="black", arrowsize=0.7, penwidth=1.1];
 
-  // ---- core + memory ----
-  core [label="Ventium core\n(ventium_top / core.sv, soc_en=1)", fillcolor="#bfe3f0",
-        width=3.2, height=0.8];
-  mem  [label="System memory\n(64-bit P5 bus via BIU)", fillcolor="#f6a6a6", width=2.2];
+  // ---- top row: core, clock, management/debug ----
+  core [label=<Ventium P5/P54C + 8 KiB L1I/L1D<BR/><FONT POINT-SIZE="8">ventium_top / ventium_l1_axi (40 MHz STA&#8209;closed)</FONT>>,
+        fillcolor="#bfe3f0", width=3.3, height=0.8];
+  pll  [label=<MMCM DRP Clock Ctrl<BR/>100 MHz &#215; 10 / N (N=25&#8594;40 MHz)<BR/><FONT POINT-SIZE="8">ven_pll_ctrl.sv (EMIO GPIO)</FONT>>,
+        fillcolor="#d8ead3", width=2.5];
+  mgmt [label=<64 KiB AXI&#8209;Lite Mgmt / Debug / PMU<BR/>M_AXI_HPM0_FPD @ 0xA000_0000<BR/><FONT POINT-SIZE="8">ven_mgmt_axil.v / ven_soc_dbg.sv</FONT>>,
+        fillcolor="#e6d5f7", width=2.8];
 
-  // ---- the PMIO I/O bus (wide bar, like the Control Unit) ----
-  pmio [label=<PMIO I/O bus &#160;&#160;(IN / OUT)<BR/><FONT POINT-SIZE="8">port decode in ventium_soc.sv</FONT>>, fillcolor="#f3c07a", width=9.0, height=0.55];
+  // ---- middle row: shim/bridge + posted DDR4 ----
+  shim [label=<PC/AT Shim &amp; AXI&#8209;to&#8209;Avalon Bridge  (No Outer L2)<BR/><FONT POINT-SIZE="8">ven_ao486_shim.sv / ven_axi2avalon.sv / system.v</FONT>>,
+        fillcolor="#f3c07a", width=5.6, height=0.55];
+  ddr  [label=<16&#8209;Slot Posted DDR4 + RAW CAM<BR/>&amp; External&#8209;Drain Barrier<BR/><FONT POINT-SIZE="8">ven_ddram_axi_posted.sv &#8594; HP0 @ 0x6000_0000</FONT>>,
+        fillcolor="#f6a6a6", width=3.1, height=0.7];
 
-  // ---- peripheral models (rtl/soc/ven_*.sv) ----
-  pic  [label=<<B>8259A PIC</B>  master + slave<BR/>0x20/0x21, 0xA0/0xA1<BR/><FONT POINT-SIZE="8">ven_pic.sv</FONT>>, fillcolor="#ef5350", fontcolor="white"];
-  pit  [label=<8254 PIT<BR/>0x40-0x43<BR/><FONT POINT-SIZE="8">ven_pit.sv</FONT>>, fillcolor="#fbe0bf"];
-  rtc  [label=<MC146818 RTC<BR/>0x70/0x71<BR/><FONT POINT-SIZE="8">ven_rtc.sv</FONT>>, fillcolor="#fbe0bf"];
-  kbd  [label=<8042 kbd/mouse<BR/>0x60/0x64<BR/><FONT POINT-SIZE="8">ven_i8042.sv</FONT>>, fillcolor="#fbe0bf"];
-  p92  [label=<Port 92  fast A20<BR/>0x92<BR/><FONT POINT-SIZE="8">ven_port92.sv</FONT>>, fillcolor="#f6d6d6"];
-  vga  [label=<VGA registers<BR/>0x3B0-0x3DF<BR/><FONT POINT-SIZE="8">ven_vgaregs.sv</FONT>>, fillcolor="#fbe0bf"];
-  acpi [label=<ACPI PM timer<BR/>0x608<BR/><FONT POINT-SIZE="8">ven_acpipm.sv</FONT>>, fillcolor="#ecd5b8"];
-  ide1 [label=<IDE primary  master disk<BR/>0x1F0/0x3F6<BR/><FONT POINT-SIZE="8">ven_ide.sv</FONT>>, fillcolor="#f8c9a0"];
-  ide2 [label=<IDE secondary  ATAPI CD-ROM<BR/>0x170/0x376<BR/><FONT POINT-SIZE="8">ven_ide.sv</FONT>>, fillcolor="#f8c9a0"];
+  // ---- bottom row: PC/AT peripherals in PL ----
+  pic  [label=<<B>8259A PIC &#215;2</B><BR/>0x20 / 0xA0<BR/><FONT POINT-SIZE="8">pic.v</FONT>>, fillcolor="#ef5350", fontcolor="white"];
+  pit  [label=<8254 PIT<BR/>0x40&#8211;0x43<BR/><FONT POINT-SIZE="8">pit.v</FONT>>, fillcolor="#fbe0bf"];
+  dma  [label=<8237 DMA &#215;2<BR/>0x00 / 0xC0<BR/><FONT POINT-SIZE="8">dma.v</FONT>>, fillcolor="#ecd5b8"];
+  rtc  [label=<MC146818 RTC<BR/>0x70 / 0x71<BR/><FONT POINT-SIZE="8">rtc.v</FONT>>, fillcolor="#fbe0bf"];
+  ps2  [label=<8042 PS/2 + Mailbox<BR/>0x60 / 0x64 + A20<BR/><FONT POINT-SIZE="8">ps2.v / ven_ps2_mailbox.sv</FONT>>, fillcolor="#fbe0bf"];
+  ide  [label=<Dual IDE &amp; FDD<BR/>0x1F0 / 0x170 / 0x3F0<BR/><FONT POINT-SIZE="8">ide.v / floppy.v</FONT>>, fillcolor="#f8c9a0"];
+  vga  [label=<VGA + Frame Capture<BR/>0x3B0&#8211;0x3DF, 0xA0000<BR/><FONT POINT-SIZE="8">vga.v / ven_video_capture.sv</FONT>>, fillcolor="#f6d6d6"];
+  snd  [label=<SB16 + OPL3<BR/>0x220 / 0x388<BR/><FONT POINT-SIZE="8">sound.v / opl3.sv</FONT>>, fillcolor="#ecd5b8"];
 
   // ---- ranks ----
-  { rank=same; core; mem; }
-  { rank=same; pic; pit; rtc; kbd; p92; vga; acpi; ide1; ide2; }
+  { rank=same; pll; core; mgmt; }
+  { rank=same; shim; ddr; }
+  { rank=same; pic; pit; dma; rtc; ps2; ide; vga; snd; }
 
-  // ---- buses ----
-  core -> pmio [dir=both, xlabel="IN/OUT"];
-  core -> mem  [dir=both, xlabel="64-bit memory bus", constraint=false];
-  pmio -> pic;  pmio -> pit;  pmio -> rtc;  pmio -> kbd;  pmio -> p92;
-  pmio -> vga;  pmio -> acpi; pmio -> ide1; pmio -> ide2;
+  pll -> core [xlabel="mmcm_clk", constraint=false];
+  core -> mgmt [dir=both, xlabel="retire / halt / trace", constraint=false];
 
-  // keep the peripheral row in port order (invisible)
-  pic -> pit -> rtc -> kbd -> p92 -> vga -> acpi -> ide1 -> ide2 [style=invis];
+  core -> shim [dir=both, xlabel="64b AXI4 + I/O"];
+  shim -> ddr  [dir=both, xlabel="DRAM bursts + drain", constraint=false];
+  mgmt -> shim [dir=both, xlabel="mgmt_* / PS2", constraint=false];
 
-  // ---- interrupt delivery (8259A) ----
+  shim -> pic; shim -> pit; shim -> dma; shim -> rtc;
+  shim -> ps2; shim -> ide; shim -> vga; shim -> snd;
+
+  pic -> pit -> dma -> rtc -> ps2 -> ide -> vga -> snd [style=invis];
+
+  // ---- interrupt delivery ----
   edge [color="#aa3333", fontcolor="#aa3333", style=dashed, constraint=false, penwidth=1.2];
-  pit  -> pic [xlabel="IRQ0"];
-  kbd  -> pic [xlabel="IRQ1/12"];
-  rtc  -> pic [xlabel="IRQ8"];
-  ide1 -> pic [xlabel="IRQ14"];
-  ide2 -> pic [xlabel="IRQ15"];
-  pic  -> core [xlabel="INTR / INTA / vector"];
-
-  // ---- A20 mask ----
-  edge [color="#2f7d2f", fontcolor="#2f7d2f", style=dotted, constraint=false, penwidth=1.2];
-  p92 -> core [xlabel="A20 mask"];
-  kbd -> core [xlabel="A20 (port 64)"];
+  pit -> pic [xlabel="IRQ0"];
+  ps2 -> pic [xlabel="IRQ1/12"];
+  rtc -> pic [xlabel="IRQ8"];
+  ide -> pic [xlabel="IRQ6/14/15"];
+  snd -> pic [xlabel="IRQ5/7"];
+  pic -> core [xlabel="INTR / INTA"];
 }

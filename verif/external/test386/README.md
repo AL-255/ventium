@@ -1,47 +1,16 @@
-# test386.asm — external x86 CPU differential testbench
+# `test386.asm` — External x86 CPU Differential Prefix Gate (`verif/external/test386/`)
 
-[`test386.asm`](https://github.com/barotto/test386.asm) is a comprehensive,
-independently-authored x86 CPU tester for emulators (used by PCem/86Box/etc.). It
-boots as a **64 KiB freestanding BIOS image** (reset `0xfffffff0` → `f000:0045`)
-and exercises 80386+ behaviour: conditional jumps, all addressing modes, protected
-mode, virtual-8086 mode, bit operations, string instructions, and more — reporting
-progress via POST codes. **License: GPL-3.0** (a standalone test tool, not linked
-into the Ventium RTL; an aggregate). The full source is vendored at
-`ventium-refs/09-external-cpu-tests/test386.asm/` (with its `COPYING`).
+[`test386.asm`](https://github.com/barotto/test386.asm) (GPL-3.0, standalone external test image — never linked into Ventium RTL; upstream sources + `COPYING` vendored in `ventium-refs/09-external-cpu-tests/test386.asm/`) is an independently authored 64 KiB bare-metal BIOS CPU test suite (`0xFFFFFFF0 → F000:0045`) used by PCem/86Box to exercise addressing modes, flags, bit/string ops, protected mode, paging, and Virtual-8086 mode.
 
-## Why it fits Ventium
+## Running
 
-It is exactly the system-mode image model the Ventium harness already runs:
-`qemu-system-i386 -bios` for the golden (`gen_trace.py --system` single-step) vs
-the Ventium RTL for the checked CPU, compared per-record under the EFLAGS-undefined
-mask. It is a much broader, externally-authored instruction stream than the
-hand-written `verif/sys/tests` corpus — a genuine independent oracle and gap-finder
-(like the M7 Quake/Win95 lock-step found `LOCK CMPXCHG`/`IN`/`OUT`/`CPUID`/… gaps).
-
-## How it's run (prefix differential)
-
-- **Golden:** `qemu-system-i386` single-stepped over the BIOS image.
-- **Checked CPU:** `ventium_soc` (`tb_soc`, `soc_en=1`). The **SoC** is the correct
-  vehicle, not the bare core: test386 writes POST codes via `OUT DX,AL` very early,
-  and the bare `ventium_top --system` HALTs on port I/O (no PC platform), whereas
-  the SoC's PMIO decoder acks the (undecoded) POST port so the run proceeds.
-- **Compare:** `compare.py --mode func` per record (pc/eflags/GPRs/segs/CRx).
-
-```bash
-bash verif/external/test386/run-test386-gate.sh [MAXI]   # MAXI default 1500
+```sh
+bash verif/external/test386/run-test386-gate.sh [MAXI]   # default MAXI=1500
 ```
 
-The committed `test386.bin` is the `nasm`-built image (so the gate needs no
-`nasm`); rebuild with `nasm -i./src/ -f bin src/test386.asm -w-all -o test386.bin`
-in the vendored source dir. `test386.sys.vtrace.golden` is the committed 1,500-insn
-reference golden (drift-checked by the gate).
+- **Oracle:** Pinned `qemu-system-i386 -bios test386.bin` (`gen_trace.py --system` single-step; `test386.sys.vtrace.golden` holds the 1,500-instruction reference prefix).
+- **DUT Vehicle:** Standalone `ventium_soc` (`tb_soc`, `soc_en=1`), which acknowledges early diagnostic POST `OUT DX,AL` writes (whereas bare `ventium_top --system` without `--cosim` halts on undecoded port I/O). Note that `ventium_soc` is an early simulation wrapper distinct from the deployed `ao486_MiSTer`-integrated SoC (`rtl_ven_soc.f` / `ao486-sim` / `c0e3fe43` on RK-XCZU15EG-F).
+- **Comparator:** `verif/diff/compare.py --mode func` per retired instruction (`pc`, `eflags`, GPRs, selectors, `cr0..cr4`).
+- **Prebuilt Image:** `test386.bin` is committed so `nasm` is not required at test time (to rebuild from `ventium-refs/`: `nasm -i./src/ -f bin src/test386.asm -w-all -o test386.bin`).
 
-## Status (2026-06-05)
-
-**EQUIVALENT to 60,000 instructions** — `ventium_soc` matches `qemu-system-i386`
-byte-for-byte across the first 60k instructions of test386's prefix (verified
-at 1.5k / 30k / 60k; no divergence yet — the committed reference golden is the
-fast 1,500-insn prefix). Raise `MAXI` for a deeper run. The eventual frontier is expected where test386 reaches an instruction
-or platform device the Ventium RTL/SoC does not yet model — an honest gap to triage
-incrementally (the SoC's free-running PIT, or an unimplemented opcode), exactly the
-kind of finding this external corpus is here to surface.
+Verified `EQUIVALENT` across the first `60,000` instructions (`1.5k` / `30k` / `60k` prefix checks); deeper runs require deterministic PIT/device alignment once `test386` enters platform-timer checks.

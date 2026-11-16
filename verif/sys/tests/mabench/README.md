@@ -1,4 +1,6 @@
-# mabench — heavy bare-metal overclock benchmark (live KV260)
+# mabench — bare-metal datapath overclock stress kernel (historical KV260 bring-up)
+
+> **Historical Platform Note (Nov 2026):** `mabench` and `mabench2` were authored in June 2026 for early bare-metal Fmax sweeps on the **KV260 (`XCK26`)** prototype before full ISA/SoC completion (at that stage `FWAIT` and `MOV moffs` were not yet wired on that test harness). Current hardware is **RK-XCZU15EG-F (`xczu15eg-ffvb1156-2-i`)** running the full `ao486_MiSTer` PC/AT platform (`c0e3fe43` on `main`, `40.264133 MHz` post-route STA sign-off, empirical single-board MMCM DRP passes at `58.824 MHz` Win95+Quake and `62.500 MHz` Quake, **`0.515778001` total U+V gameplay IPC**). Never substitute `mabench` for standard-suite or gameplay qualification.
 
 A deterministic FP+BCD+integer kernel for stressing the Fmax-critical datapaths the
 trivial `psocfw` smoke never touches: the x87 FADD/FMUL/FSQRT cone, the FBSTP

@@ -1,203 +1,73 @@
-# Producer A — QEMU gdbstub golden architectural-state trace
+# Producer A — Pinned QEMU Golden Trace Generator & Oracle Rules (`verif/qemu-trace/`)
 
-`gen_trace.py` is **Producer A** of the Ventium differential-testing stack
-(see [`../../PLAN.md`](../../PLAN.md) §4.1 and
-[`../../docs/trace-format.md`](../../docs/trace-format.md)). It is the
-**functional oracle** for the whole project: it emits a functional-mode
-`.vtrace` of the full per-instruction architectural state by single-stepping a
-32-bit i386 ELF under QEMU and reading the register file over the GDB Remote
-Serial Protocol (RSP).
+`gen_trace.py` is **Producer A** of the Ventium differential-verification stack (`docs/trace-format.md`). It single-steps 32-bit i386 user ELFs (`qemu-i386 -cpu pentium`) or bare-metal system/BIOS images (`qemu-system-i386 -cpu pentium`) over the GDB Remote Serial Protocol (RSP) and emits canonical `.vtrace` records exclusively through `../diff/tracefmt.py`.
 
-## Why the gdbstub (and not a TCG plugin)?
+> **Oracle Requirement (`AGENTS.md`):** Differentials require the pinned QEMU 8.2.2 Pentium oracle in `ventium-refs/07-p5-emulation-harness`; distribution QEMU builds are **not** interchangeable.
 
-QEMU 8.2.2's *plugin* API (`QEMU_PLUGIN_VERSION 1`) **cannot read register
-values** — `qemu_plugin_read_register` only arrived in QEMU 9.0. Plugins can see
-PC, instruction bytes, and memory addresses (that is Producer B's job,
-`../qemu-plugins/p5trace.c`), but the architectural register file is *only*
-observable through the gdbstub that `qemu-i386 -g <port>` exposes. So we
-single-step the guest over RSP and read all registers after each instruction.
-
-Owned QEMU launches use a **private Unix socket with peer-PID authentication**;
-see [OWNED_GDB.md](OWNED_GDB.md) for the port-collision defect and qualification.
-There is **no host `gdb` dependency** and **no third-party Python package**.
-Explicit remote `RSPClient` callers can still use TCP.
-
-For system traces, optional instruction bytes are read at the actual hidden
-`CS.base + EIP`. When QEMU's i386 register packet omits `CS.base`, the collector
-uses the fixed read-only `monitor info registers` query before each instruction.
-It does not guess `selector << 4`, reconstruct the base from a possibly changed
-descriptor table, or cache it across same-selector reloads. Missing, ambiguous,
-or selector-inconsistent replies fail closed. This also handles the special
-reset CS base. The query does not change guest state, retirement records, or
-comparison masks; `--no-bytes` and user-mode collection do not use it.
-Host protocol checks: `python3 -B -m unittest discover -s verif/qemu-trace
--p test_system_cs_observer.py` from the repository root. Previously generated
-system traces can contain incorrect opcode-byte metadata; regenerate required
-goldens deliberately rather than editing their recorded fields.
+---
 
 ## Usage
 
-For the opt-in terminal-state observer's original diagnosis, see
-[PREEXIT_OBSERVER.md](PREEXIT_OBSERVER.md). The subsequently qualified observer
-and defined-x87 repairs can now be selected explicitly in `make verify` through
-the [hash-pinned reference profile](QUALIFIED_PROFILE.md). The default QEMU
-binary is unchanged, and selecting that profile does not waive cycle failures.
+```sh
+# User-mode ELF trace:
+python3 verif/qemu-trace/gen_trace.py \
+  --qemu ventium-refs/07-p5-emulation-harness/build/qemu/build/qemu-i386 \
+  --elf verif/tests/smoke/smoke.elf --out /tmp/smoke.vtrace [--x87] [--max-insn N]
 
+# System-mode bare-metal BIOS trace:
+python3 verif/qemu-trace/gen_trace.py \
+  --qemu ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386 \
+  --system --image verif/sys/tests/pmode/pmode.bin --image-mode bios \
+  --out /tmp/pmode.sys.vtrace --max-insn 4000
 ```
-gen_trace.py --qemu <path> --elf <file> --out <trace.vtrace>
-             [--max-insn N] [--port P] [--x87] [--stop-at 0xADDR]
-             [--no-bytes] [--verbose] [--args ...]
-```
 
-| flag | meaning |
-|---|---|
-| `--qemu` | path to the plugin/gdbstub-enabled `qemu-i386` |
-| `--elf`  | the 32-bit i386 ELF to trace (statically linked recommended) |
-| `--out`  | output `.vtrace` (JSON Lines, see trace-format.md) |
-| `--max-insn N` | stop after N retired instructions (safety cap; default: run to exit) |
-| `--port P` | legacy compatibility argument; owned launches use private sockets |
-| `--x87` | also emit x87 fields (`st0..st7`, `fctrl..fop`); header `x87:true` |
-| `--stop-at 0xADDR` | stop when `EIP` reaches `ADDR` (before stepping it) |
-| `--no-bytes` | do not read/emit the optional per-instruction `bytes` field |
-| `--verbose` | dump every RSP packet to stderr (debugging) |
-| `--args ...` | forwarded to the guest program (must be the **last** flag) |
+| Flag | Meaning |
+| --- | --- |
+| `--qemu <path>` | Path to pinned `qemu-i386` or `qemu-system-i386`. |
+| `--elf <file>` | User-mode 32-bit i386 ELF (`--args ...` must be last if passing guest args). |
+| `--system` / `--image <bin>` / `--image-mode bios` | System-mode launch (`F000:FFF0` real-mode reset, `-machine pc -m 32 -device isa-debug-exit,iobase=0xf4,iosize=0x04`), emitting `sys:true` (`cr0..cr4` + selectors). |
+| `--x87` | Emit 80-bit `st0..st7` and `fctrl/fstat/ftag/fiseg/fioff/foseg/fooff/fop` (`x87:true`). |
+| `--out <file>` | Output `.vtrace` path. |
+| `--max-insn N` / `--stop-at 0xADDR` | Cap retired instructions or stop before stepping `ADDR`. |
+| `--no-bytes` | Omit per-record instruction `bytes` readback. |
+| `--port P` | Legacy compatibility flag; owned QEMU launches always use authenticated private Unix sockets (`owned_gdb.py`). |
 
-### Example (the built-in self-test)
+### Record Post-State Convention & `g`-Packet Discovery
+
+Record `n` pairs the **fetch `pc`** (`EIP` before stepping) with the **post-commit register state** immediately after stepping (`pc(n+1) == post_eip(n)` modulo control flow). Rather than hardcoding register offsets, `gen_trace.py` queries `qXfer:features:read:target.xml` (`i386-32bit.xml`) at startup and uses `anchor_tail` to align QEMU's 344-byte `i386-softmmu` `g`-packet (`cr0..cr4` at byte 76, `st0..fop` at byte 100).
+
+---
+
+## Enduring Transport & Oracle Rules
+
+The helper modules and subdirectories in `verif/qemu-trace/` address specific transport and QEMU 8.2.2 oracle behaviors discovered during full-P5 / shared-FPU verification:
+
+### 1. Authenticated Private Unix-Socket GDB Transport (`owned_gdb.py`)
+
+TCP gdbstub ports (`-g <port>`) can silently collide with parallel workers or unrelated host processes, producing a valid `.vtrace` header from the wrong guest. `owned_gdb.py` allocates a private Unix domain socket per owned QEMU child across all four producer paths (user, system, syscall proxy, and reset-memory capture) and verifies peer `PID`/`UID`/`GID` via Linux `SO_PEERCRED` before sending any RSP command (using `/proc/<pid>/fd/<dirfd>/gdb` when `TMPDIR` exceeds `sun_path` length). Functional golden-cache keys in `verif/lib/verify_worker.sh` hash `gen_trace.py`, `owned_gdb.py`, and `tracefmt.py`.
+
+### 2. System-Mode Hidden `CS.base` Observation (`test_system_cs_observer.py`)
+
+In `--system` mode when `--no-bytes` is off, instruction bytes must be fetched from `CS.base + EIP` rather than assuming `CS << 4` (which breaks unreal mode, relocated protected-mode descriptors, and the `0xFFFF0000` reset `CS.base`). When the `g`-packet omits `CS.base`, `gen_trace.py` issues a read-only `monitor info registers` query and fails closed on missing or selector-inconsistent replies.
+
+### 3. Opt-In Hash-Pinned Qualified User Reference (`qualified_profile.py`)
+
+Stock QEMU 8.2.2 (`11aa0b1f...`) stays unmodified by default. For full-P5 `VEN_L1_AXI` + `VEN_FP_SHARED` user-mode verification (`VTM_QEMU_PROFILE_BUILD` / `run_qualified_profile_gate.py`, profile `i386-defined-x87-preexit-20261016`), `qualified_profile.py` verifies the 11,132-file source closure and binary hash of a privately built QEMU 8.2.2 incorporating five audited oracle repairs (`108/108` functional corpus PASS without relaxing comparator masks or cycle bands):
+
+1. **Pre-Exit Terminal Observation (`prepare_preexit_observer.py`, `VTM_QEMU_GDB_PREEXIT=1`):** Exposes the live CPU via `gdb_handlesig` at `exit`/`exit_group` before `linux-user` tears down the task, matching UV-fast RTL's retired `int $0x80` record (`verify_worker.sh` isolates `.preexit0` and `.preexit1` cache keys).
+2. **SoftFloat Round-Increment & Instruction `C1` (`prepare_round_increment.py`, `c1_reference/`):** Tracks true post-subnormal/tie carry-into-LSB magnitude increments (`inc > round_mask - (frac_lo & round_mask)`) in `float_status` and wires Pentium Vol. 3 Table 6-4 `C1` rules across arithmetic, `FSQRT`, narrowing `FST`, `FLD`/`FILD`/`FCHS`/`FABS`/`FXCH` clears, while preserving `FXAM`/`FWAIT` state.
+3. **`FPREM` / `FPREM1` Quotient, Precision, Exceptions & Underflow (`prepare_remainder_quotient.py`, `remainder_sequence/`):** Separates nearest-even vs truncating modulus from quotient-pointer presence so `FPREM1` populates `C0/C3/C1` (`Q2/Q1/Q0`), fixes multi-step `q << exp_diff` low-64-bit accumulation, forces internal `PC64` during `helper_fprem_common` (restoring caller `PC` afterward), enforces `IE > DE` / empty-stack operand preservation, and scales nonzero tiny remainders by `2^24576` with `UE` when `UM=0`.
+4. **`FRNDINT` Precision & Denormal Handling (`frndint/`):** Evaluates `FRNDINT` at full extended precision regardless of `PC24`/`PC53` (restoring `PC` afterward), sets roundup `C1`, and enforces masked/unmasked `IE`/`DE` operand preservation.
+5. **x87 Environment Pointer Layouts (`fp_env/`):** Implements all four 14/28-byte protected and real/V86 (`env->eflags & VM_MASK`) FIP/FDP pointer formats in `do_fstenv`/`do_fldenv` per Pentium Vol. 3 Figs. 6-6..6-9.
+
+### 4. System-Mode QEMU Cross-Page TB Invalidation (`tb_page/`) & SDM Gaps
+
+- **Cross-page SMC invalidation (`tb_page/`):** QEMU 8.2.2 `accel/tcg/tb-maint.c` computes `pindex1` from `paddr0` instead of `paddr1` in `tb_record`/`tb_remove`, failing to invalidate cross-page translated blocks after self-modifying stores (fixed upstream in QEMU commit `3b279f73`; isolated backport harness in `verif/qemu-trace/tb_page/`).
+- **QEMU softmmu architectural omissions:** Stock QEMU 8.2.2 omits per-access segment-limit checks, null data-selector `#GP(0)` faults, `FNSTENV` exception masking, x87 stack faults, and gdbstub `SMI#` stepping (plus uses P6 SMRAM offsets). Those contracts are verified by dedicated Intel SDM witness gates in `verif/sys/`.
+
+## Host Unit Tests
 
 ```sh
-QEMU=../../ventium-refs/07-p5-emulation-harness/build/qemu/build/qemu-i386
-printf '.global _start\n_start:\n mov $1,%%eax\n add $2,%%eax\n mov $1,%%eax\n xor %%ebx,%%ebx\n int $0x80\n' > /tmp/vt.s
-gcc -m32 -nostdlib -static -o /tmp/vt.elf /tmp/vt.s
-python3 gen_trace.py --qemu "$QEMU" --elf /tmp/vt.elf --out /tmp/vt.vtrace --max-insn 50
+TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
+  python3 -B -m unittest discover -s verif/qemu-trace -p 'test_*.py'
 ```
-
-Produces records where `eax` becomes `1`, then `3`, then `1`, and the guest exit
-(`int $0x80` / `W00`) is detected cleanly. Parse/validate the result with the
-shared module:
-
-```python
-import sys; sys.path.insert(0, "../diff")
-import tracefmt
-t = tracefmt.read_trace("/tmp/vt.vtrace")          # raises on malformed input
-assert [int(r["eax"], 16) for r in t.records] == [1, 3, 1, 1]
-```
-
-## Record / state convention
-
-Per [`trace-format.md`](../../docs/trace-format.md) §2.1, **record `n` describes
-the instruction *fetched* at `pc`, carrying the architectural state immediately
-*after* that instruction commits** (post-state). The generation loop is:
-
-```
-read regs  -> pc = current eip      (fetch address of the insn about to run)
-step       -> execute exactly one instruction
-read regs  -> post-state; new eip is the NEXT insn's fetch address
-emit {n, pc=old_eip, <post-state regs>}
-```
-
-Therefore `pc(record n+1) == next-eip(record n)` modulo control flow — the
-redundant control-flow check the comparator (`../diff/compare.py`) may use.
-
-Field names and hex formatting are produced **exclusively** through
-`../diff/tracefmt.py` (`header()` / `func_record()` / `dumps()`), so they cannot
-drift from the comparator's parser. Selectors are masked to 16 bits; GPRs/eflags
-are 32-bit; x87 stack regs are 80-bit (20 hex digits).
-
-## How the RSP register layout is derived
-
-The `g` ("read general registers") packet is a flat, little-endian byte image of
-the register file. Its layout is **not** assumed — it is discovered at runtime so
-the slicing can never silently desync from the QEMU build in use:
-
-1. Negotiate `qSupported` (and try `QStartNoAckMode` to drop per-packet acks).
-2. Read the target description via `qXfer:features:read:target.xml:0,…`.
-3. Follow each `<xi:include href="…"/>` (here: `i386-32bit.xml`, which also
-   carries the i387/x87 regs) and parse every `<reg name="…" bitsize="…">` in
-   **declaration order** — that order *is* the `g`-packet field order.
-4. Build an ordered `(name, bits, byte_offset)` table and slice each field out of
-   the `g` reply by offset, decoding little-endian.
-
-### The layout QEMU 8.2.2 actually serves (verified live)
-
-`qemu-i386`'s `i386-32bit.xml` describes **53 registers / 356 bytes**:
-
-| offset (B) | regs | width |
-|---|---|---|
-| 0   | `eax ecx edx ebx esp ebp esi edi` | 32b each |
-| 32  | `eip` | 32b |
-| 36  | `eflags` | 32b |
-| 40  | `cs ss ds es fs gs` | 32b each *(selector in low 16b)* |
-| 64  | `ss_base ds_base es_base fs_base gs_base k_gs_base` | 32b each |
-| 88  | `cr0 cr2 cr3 cr4 cr8 efer` | 32b each |
-| 112 | `st0 … st7` | 80b each |
-| 192 | `fctrl fstat ftag fiseg fioff foseg fooff fop` | 32b each |
-| 224 | `xmm0 … xmm7` | 128b each |
-| 352 | `mxcsr` | 32b |
-
-Two important quirks this generator handles:
-
-- **The `g` reply is truncated to ~344 bytes** (it stops partway through the
-  `xmm` tail). All fields we emit — integer/system through `fop` at offset 224 —
-  are fully present, so func and x87 modes are complete. A field whose bytes are
-  absent is treated as `0`.
-- **`cs..gs` occupy 32-bit slots** in the `g`-packet even though selectors are
-  16-bit; we mask to 16 bits when mapping to the trace's `cs..gs` fields.
-
-The slicing was cross-checked byte-for-byte against QEMU's authoritative
-per-register `p<regnum>` reads (eax/eip/eflags/cs/esp all matched).
-
-### Documented fallback layout
-
-If `qXfer` is unavailable (older/odd stub), the code falls back to the **classic
-i386 layout** in `FALLBACK_LAYOUT`:
-
-```
-eax ecx edx ebx esp ebp esi edi  (32b)
-eip(32) eflags(32)
-cs ss ds es fs gs                (32b each in the g-packet)
-st0..st7                         (80b each)
-fctrl fstat ftag fiseg fioff foseg fooff fop  (32b each)
-```
-
-The fallback omits QEMU's extra `ss_base..efer` block, so its x87 offsets would
-not align with this particular build — but every **func-mode** field
-(GPRs, `eip`, `eflags`, selectors), which is what the M1 comparator gates on, is
-read identically by both layouts (verified live). Prefer the runtime-discovered
-layout; the fallback exists only so a stub without `qXfer` still produces a
-usable integer trace.
-
-## Robustness notes (for the integration phase)
-
-- **Process lifecycle:** the qemu child is always terminated/killed and reaped in
-  a `finally` block, including on RSP errors or `KeyboardInterrupt`. Before
-  closing, the client sends `k` (kill inferior) best-effort.
-- **Connection:** owned launches wait for their private socket and verify the
-  live child's PID/UID/GID before any protocol command. Startup exit fails closed.
-- **Framing:** packets are `$<payload>#<cksum2hex>`, `cksum = sum(payload) & 0xff`.
-  Good packets are acked with `+`; bad checksums request a resend with `-`;
-  `QStartNoAckMode` is used when the stub accepts it. RSP `}` escaping (used in
-  binary `qXfer` data) is decoded.
-- **Timeouts:** all socket reads have a timeout (`RSPError` on expiry) so a hung
-  qemu can never wedge the generator.
-- **Unavailable register bytes:** if the stub reports a byte pair as `xx`, it is
-  substituted with `0x00` (the register reads as `0`) rather than crashing.
-- **Stop replies:** `T05`/`S05` = stopped (continue stepping); `W<code>` = exit;
-  `X<sig>` = killed by signal — both stop tracing. `O…` console output mid-step
-  is skipped and the real stop reply is re-read.
-- **Exit detection** uses the `W`/`X` stop reply (not the post-step `g`), so the
-  final `int $0x80`/`exit` instruction is *not* emitted with bogus post-state.
-- **x87 caveat:** QEMU user-mode's gdbstub tracks the x87 stack lazily and may
-  report stale/zeroed `st*`/`fstat`/`ftag` for short freestanding programs. The
-  generator faithfully reports exactly what the stub exposes (its `g` slice
-  equals QEMU's own `p<regnum>` reads); any x87-fidelity gap is QEMU's, not this
-  tool's. This matters for M3 (x87 milestone) — validate the x87 oracle path on a
-  real FP workload there.
-
-## Integration
-
-- Output is consumed by `../diff/compare.py` in **functional mode** (Producer A
-  vs Producer C / the RTL). Header is
-  `{"vtrace":1,"producer":"qemu-gdbstub","mode":"func","x87":<bool>,"note":…}`.
-- Pure `python3` + stdlib; no build step. Import path to `tracefmt.py` is set up
-  automatically (relative `../diff`).
-- Parallel owned launches are isolated automatically; no port allocation needed.

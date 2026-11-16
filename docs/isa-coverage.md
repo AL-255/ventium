@@ -1,170 +1,85 @@
 # Ventium ISA Coverage Matrix
 
-Status of the integer (one-byte + `0F` two-byte) and x87 ISA as actually decoded
-in `rtl/core/core.sv`. This replaces the unqualified "full integer ISA" claim
-flagged in `REVIEW_Jun5.md` §1 with a machine-checkable family-by-family table.
+Family-by-family coverage of the non-MMX Intel Pentium (**P5/P54C**, Family 5) integer, system, and x87 ISA as decoded in `rtl/core/decode_stages.sv`, `rtl/core/decode.sv`, `rtl/core/core.sv`, and `fp_shared/ven_fp_top.sv`.
 
-**Scope line:** Ventium implements a broad IA-32 / P54C integer subset plus a
-normal-operand x87 datapath. **Instructions not listed as IMPLEMENTED HALT
-loudly (no silent misexecution):** any decode path that does not match an
-implemented arm falls to a `default` (or guarded `else`) that sets
-`d_unknown=1'b1`, which routes the FSM to `S_HALT` (`core.sv:19`,
-`core.sv:2029`, `core.sv:1281`). A HALT is never a wrong retire — it is a hard
-stop, so the differential gate cannot mistake an unimplemented opcode for a
-clean run.
-
-## How the HALT set is derived
-
-Status is read directly from decode in `rtl/core/core.sv`. An instruction is:
-
-- **IMPLEMENTED** — its opcode has a decode arm that sets a real `d_kind` /
-  `d_sysop` / `d_fxop` / branch fields and never reaches `d_unknown` on that
-  path.
-- **PARTIAL** — implemented for the forms the corpus needs, but specific
-  sub-forms (a `mod`/`reg` subcase, a non-default operand class, or a
-  mode/feature gate) fall to `d_unknown` and HALT, OR an architectural detail
-  (e.g. `#DE` on divide-by-zero) is not raised.
-- **HALT (deferred)** — every decode path for that opcode sets `d_unknown=1'b1`
-  (or it has no arm and hits the one-byte `default` at `core.sv:2029`). These
-  are the real coverage gaps.
-
-The HALT gaps below were confirmed by grepping every `d_unknown=1'b1`
-occurrence in `core.sv` and reading the guarding opcode/comment.
+- **Hardware Qualification Baseline (Nov 2026):** Board-qualified on **RK-XCZU15EG-F** image **`c0e3fe43`** (`161` defines, `40.264133 MHz` STA sign-off, **`0.515778001` total U+V / `0.397847833` primary/U Quake gameplay IPC** across cycles `28,696,827,616–32,989,404,795`), passing CoreMark, cold Windows 95 OSR2 GUI + shutdown, and cold DOS Quake `demo1` (`8.0 FPS`).
+- **Loud-Fail Safety Rule:** Unsupported or out-of-scope opcodes **never silently mis-execute**. Unimplemented encodings either raise architectural `#UD` (where required in system mode, such as `UD2`, illegal `LOCK`, or invalid `MOV CRn`/`DRn` encodings) or set `d_unknown = 1'b1` → `S_HALT` (`rsp_unsupported` in `ven_fp_top`). See also [`unsupported-isa.md`](unsupported-isa.md) and the interactive [`docs/sphinx/isa/opcode-map.rst`](sphinx/isa/opcode-map.rst).
 
 ---
 
-## Integer — one-byte opcodes
+## 1. Integer & System — One-Byte Opcodes (`00`–`FF`)
 
-| Family | Opcodes | Status | Evidence (core.sv) |
+| Family | Opcodes | Status | Implementation Notes (`decode.sv` / `decode_stages.sv` / `core.sv`) |
 | --- | --- | --- | --- |
-| ALU r/m,r,imm (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP, group-1 `80/81/83`) | 00–3D, 80–83 | IMPLEMENTED | fast path `S_PIPE` + slow `K_ALU`; flags QEMU-matched |
-| INC/DEC/PUSH/POP r (single-byte) | 40–5F | IMPLEMENTED | `K_*`/`K_STKMISC` arms |
-| PUSHA / POPA | 60 / 61 | IMPLEMENTED (modeled by effect) | `K_STKMISC` SM_PUSHA/SM_POPA, micro-sequenced in `S_USEQ` (`core.sv:1311-1312`; exec `core_exec.svh:479`) |
-| PUSH imm / IMUL r,r/m,imm | 68/6A, 69/6B | IMPLEMENTED | `K_IMUL2` 3-op (`core.sv:1322,1336`) |
-| INS / OUTS (string port I/O) | 6C/6D | IMPLEMENTED (cosim/co-sim gated) | `K_STR` ST_INS (`core.sv:1586`) |
-| Jcc rel8 | 70–7F | IMPLEMENTED | branch decode |
-| MOV / TEST / XCHG / LEA r/m | 88–8D, 84–87 | IMPLEMENTED | `K_MOV`/`K_ALU`/`K_LEA` |
-| NOP / XCHG eAX,r | 90–97 | IMPLEMENTED | `core.sv:1494` |
-| CWDE/CDQ, PUSHF/POPF, SAHF/LAHF | 98/99, 9C/9D, 9E/9F | IMPLEMENTED (PUSHF/POPF modeled by effect via `S_USEQ`) | `K_STKMISC` SM_PUSHF/SM_POPF (`core.sv:1500-1501`) |
-| MOV moffs, string MOVS/STOS/LODS/SCAS/CMPS | A0–A3, A4–A7, AA–AF | IMPLEMENTED (string = modeled by effect, REP via `S_USEQ`) | `K_STR` arms (`core.sv:1561-1570`) |
-| MOV r,imm | B0–BF | IMPLEMENTED | `core.sv:1285,1290` |
-| Shift/rotate group-2 imm8 | C0/C1 | IMPLEMENTED | shift decode |
-| RET near (+imm16) | C2 / C3 | IMPLEMENTED (modeled by effect) | `K_CTRL` CT_RETN/CT_RETN_IMM (`core_exec.svh:548-555`) |
-| LEAVE / ENTER, MOV r/m,imm | C8/C9, C6/C7 | IMPLEMENTED | `K_*` arms; `t_leave16` |
-| INT3 / INT n / INTO / IRET | CC / CD / CE / CF | PARTIAL — IMPLEMENTED in **system mode** (IDT delivery); HALT in user mode (no IDT) | `core.sv:1763,1769,1780,1786` — user path sets `d_unknown` (except `INT 0x80` proxy) |
-| Shift/rotate group-2 by 1 / CL | D0–D3 | IMPLEMENTED | `core.sv:1620` |
-| **BCD / ASCII adjust: DAA / DAS / AAA / AAS / AAM / AAD** | **27 / 2F / 37 / 3F / D4 / D5** | **IMPLEMENTED (review response, QEMU-exact)** | `K_ALU` `ALU_DAA..ALU_AAD` decode (`core.sv:1509-1520`); exec (`bcd_ax`/`bcd_flags` block) matches QEMU `helper_aaa/aas/daa/das/aam/aad` exactly (`core.sv:2356-2439`). Undefined flags masked via `tracefmt.eflags_undefined_mask`. `AAM` base-0 `#DE` is deferred (quotient/remainder guarded to 0, like native DIV-by-zero — `core.sv:2422-2423`) |
-| x87 escapes | D8–DF | PARTIAL (see x87 table) | `core.sv:1853` |
-| LOOP/LOOPE/LOOPNE/JCXZ | E0–E3 | IMPLEMENTED | `K_CTRL` CT_LOOP* (`core_exec.svh:556`) |
-| IN/OUT imm8 / DX | E4–E7, EC–EF | IMPLEMENTED (out-of-cosim non-`out 0xf4` HALTs) | `core.sv:1824-1842` |
-| CALL rel / near JMP rel / far JMP | E8 / E9/EB / EA | IMPLEMENTED (CALL = modeled by effect) | `K_CTRL` CT_CALLREL (`core.sv:1737`); far JMP `SYS_LJMP` (`core.sv:1794`) |
-| HLT | F4 | IMPLEMENTED (stops retiring) | `d_halt` (`core.sv:1810`) |
-| CLC/STC/CLI/STI/CLD/STD, group-3 (TEST/NOT/NEG/MUL/IMUL/DIV/IDIV), group-4/5 (INC/DEC/CALL/JMP/PUSH) | F5–FF | IMPLEMENTED (MUL/DIV native — see PARTIAL note) | `K_MULDIV` (`core.sv:1684`); CALL-ind `core.sv:1702` |
-| **MUL/IMUL/DIV/IDIV (group-3)** | F6/F7 /4–/7 | **PARTIAL — architecturally correct result, but DIV/IDIV do NOT raise `#DE` on divide-by-zero or quotient-overflow** | native `* / %` in single `S_EXEC` arm, no `srcv==0` guard (`core_exec.svh:214-284`) |
-
-### Integer one-byte HALT (deferred) gaps
-
-There are **no whole-opcode one-byte integer HALT gaps** in the current decode.
-The BCD/ASCII adjusts (`0x27/0x2F/0x37/0x3F/0xD4/0xD5`) flagged in the review
-have been implemented as the review response (see the integer table) — they now
-decode to `K_ALU` `ALU_DAA..ALU_AAD` (`core.sv:1509-1520`) and no longer fall to
-the one-byte `default` at `core.sv:2029`.
-
-The remaining one-byte boundaries are **mode/feature conditional**, not whole
-opcodes (already listed PARTIAL in the integer table):
-
-| Mnemonic | Opcode | Conditional HALT |
-| --- | --- | --- |
-| INT3 / INT n / INTO / IRET | CC / CD / CE / CF | HALT in **user mode** (no IDT); `INT 0x80` user routes to the proxy (`core.sv:1763,1769,1780,1786`) |
-| Other IN/OUT outside co-sim | E4–E7, EC–EF | only `out 0xf4` (isa-debug-exit) is allowed outside co-sim; any other IN/OUT HALTs (`core.sv:1818-1842`) |
-| AAM base 0 (`#DE`) | D4 00 | architectural `#DE` is deferred (quotient/remainder guarded to 0; corpus never executes it) (`core.sv:2422-2423`) |
+| `ADD`/`OR`/`ADC`/`SBB`/`AND`/`SUB`/`XOR`/`CMP` (`r/m`, `r`, `imm`, Group 1) | `00`–`3D`, `80`–`83` | **IMPLEMENTED** | Fast-path `S_PIPE` (`u_pipe`/`v_pipe`) + `K_ALU`; 8/16/32-bit operand & address sizes. |
+| Segment pushes/pops (`PUSH`/`POP` `ES`/`CS`/`SS`/`DS`) | `06`/`07`/`0E`/`16`/`17`/`1E`/`1F` | **IMPLEMENTED** | Real, V86, and protected-mode descriptor load/checks (`core_seg_ljmp.svh`). |
+| BCD / ASCII adjust (`DAA`, `DAS`, `AAA`, `AAS`, `AAM`, `AAD`) | `27`, `2F`, `37`, `3F`, `D4`, `D5` | **IMPLEMENTED** | `uv_common.sv` / `K_ALU` (`AAM` base-0 `#DE` guarded in non-faulting user mode). |
+| `INC`/`DEC`/`PUSH`/`POP` general register | `40`–`5F` | **IMPLEMENTED** | Fast-path `S_PIPE` (including AP-500 ESP-exempt `PUSH`/`POP` pairs) + slow FSM. |
+| `PUSHA` / `POPA` | `60` / `61` | **IMPLEMENTED** | `K_STKMISC` (`SM_PUSHA`/`SM_POPA`) 8-transfer sequence in `S_USEQ`. |
+| `BOUND r16/32, m16&16/m32&32` | `62` | **IMPLEMENTED** | `K_BOUND`; raises `#BR` (vector 5) when out of bounds (`#UD` on `mod==11`). |
+| `ARPL r/m16, r16` | `63` | **HALT (deferred)** | Unimplemented (`d_unknown = 1'b1`). |
+| `PUSH imm8/16/32` & `IMUL r, r/m, imm` | `68`/`6A`, `69`/`6B` | **IMPLEMENTED** | `S_PIPE` fast `PUSH imm` + `K_IMUL2` (10-cycle modeled occupancy). |
+| String port I/O (`INSB`/`INSW`/`INSD`, `OUTSB`/`OUTSW`/`OUTSD`) | `6C`–`6F` | **IMPLEMENTED (system/SoC)** | `K_STR` I/O string transfers with `REP` and CPL/IOPL/TSS I/O bitmap checks; HALT in plain user-mode TB. |
+| `Jcc rel8` | `70`–`7F` | **IMPLEMENTED** | `S_PIPE` `PV`-pairable branch + dual-port 256-entry BTB. |
+| `TEST`, `XCHG`, `MOV r/m,r`, `MOV sreg`, `LEA`, `POP r/m` | `84`–`8F` | **IMPLEMENTED** | Fast-path `S_PIPE` for `MOV`/`TEST`/`LEA`; descriptor-checked `MOV sreg` in PM. |
+| `NOP`, `XCHG eAX,r`, `CBW`/`CWDE`, `CWD`/`CDQ` | `90`–`99` | **IMPLEMENTED** | `S_PIPE` `NOP` + `K_ALU` / sign-extension arms. |
+| Far `CALL ptr16:16/32` (`9A`) & `FWAIT` (`9B`) | `9A`, `9B` | **IMPLEMENTED** | `SYS_LJMP` (real/PM code, call gates, 32-bit TSS; task gate/`286` TSS loud-HALT per `unsupported-isa.md`); `FWAIT` checks pending `#MF`. |
+| `PUSHF`/`POPF`, `SAHF`/`LAHF` | `9C`–`9F` | **IMPLEMENTED** | `SM_PUSHF`/`SM_POPF` with CPL/IOPL/V86 `IF`/`VIP`/`VIF` semantics. |
+| `MOV moffs` & String ops (`MOVS`, `CMPS`, `STOS`, `LODS`, `SCAS` + `REP*`) | `A0`–`AF` | **IMPLEMENTED** | `K_STR` via `S_USEQ` + pipelined 1-elem/clk `REP STOS` cacheable store streaming (`VEN_REP_STOS_STREAM`). |
+| `MOV r, imm` & Shift/Rotate Group 2 (`imm8`, `1`, `CL`) | `B0`–`C1`, `D0`–`D3` | **IMPLEMENTED** | `S_PIPE` fast `MOV imm` and `PU` shifts by `1`/`imm8`; `CL` shifts `NP`. |
+| `RET` near (`C2`/`C3`), `LES`/`LDS` (`C4`/`C5`), `MOV r/m,imm` (`C6`/`C7`), `ENTER`/`LEAVE` (`C8`/`C9`), `RETF` (`CA`/`CB`) | `C2`–`CB` | **IMPLEMENTED** | Near `RET` + 4-entry RAS; real/V86/PM `LES`/`LDS` and inter-privilege `RETF`. |
+| `INT3`, `INT n`, `INTO`, `IRET` | `CC`–`CF` | **IMPLEMENTED (system)** | Full real/V86/PM IDT gate & cross-privilege/NT-TSS `IRET` delivery (`boot_mode=user` halts except `INT 0x80` syscall/exit proxy). |
+| `XLATB` (`D7`) & `LOOP*`/`JCXZ`/`JECXZ` (`E0`–`E3`) | `D7`, `E0`–`E3` | **IMPLEMENTED** | `XLATB` address/segment-aware lookup; `K_CTRL` loop/counter branches. |
+| Port `IN` / `OUT` (`imm8` & `DX`) | `E4`–`E7`, `EC`–`EF` | **IMPLEMENTED (system/SoC)** | CPL/IOPL/V86 TSS I/O-permission bitmap checked; in standalone user TB only `out 0xf4` debug-exit is enabled. |
+| `CALL rel`, `JMP rel32/rel8`, far `JMP ptr16:16/32` | `E8`–`EB` | **IMPLEMENTED** | `S_PIPE` `PV` near `CALL`/`JMP`; far `JMP` via `SYS_LJMP` (real/PM/gate/32-bit TSS). |
+| `LOCK` (`F0`), `REPNE`/`REP` (`F2`/`F3`), `HLT` (`F4`), `CMC`/`CLC`/`STC`/`CLI`/`STI`/`CLD`/`STD` | `F0`–`FD` | **IMPLEMENTED** | Illegal `LOCK` prefix combinations raise architectural `#UD`; `VEN_L1_AXI` enforces `LOCK` RMW fabric hold. |
+| Group 3 (`TEST`/`NOT`/`NEG`/`MUL`/`IMUL`/`DIV`/`IDIV`) & Group 4/5 (`INC`/`DEC`/`CALL`/`JMP`/`PUSH`) | `F6`/`F7`, `FE`/`FF` | **IMPLEMENTED** | `DIV`/`IDIV` raise `#DE` (vector 0) on divide-by-zero & quotient overflow (`pde` gate) and run on iterative `ven_idiv.sv` (`+VEN_IDIV_ITER`). |
 
 ---
 
-## Integer — two-byte `0F` opcodes
+## 2. Two-Byte `0F` Opcodes
 
-| Family | Opcode | Status | Evidence (core.sv) |
+| Family | Opcode | Status | Implementation Notes (`decode_stages.sv`) |
 | --- | --- | --- | --- |
-| LGDT / LIDT | 0F 01 /2,/3 | IMPLEMENTED (system mode) | `SYS_LGDT/SYS_LIDT` (`core.sv:1109-1114`) |
-| LTR / STR | 0F 00 /3,/1 | IMPLEMENTED (system mode, reg form) | `SYS_LTR/SYS_STR` (`core.sv:1087-1091`) |
-| SLDT / LLDT | 0F 00 /0,/2 | IMPLEMENTED (system mode, register form) | `decode_stages.sv` group0F00; `core_exec.svh`/`core_tss_priv.svh` |
-| LAR / LSL | 0F 02/03 | IMPLEMENTED (protected mode, fixed word selector; word/dword destination) | Shared `S_DQUERY`; rejected selectors leave the destination unchanged. `plar` differential and `pverrw` TF regression. |
-| VERR / VERW | 0F 00 /4,/5 | IMPLEMENTED (protected mode, any CPL, register/memory word source); ten directed cases qualified, full cold-suite pending | `decode_stages.sv` and shared `S_DQUERY`; only ZF changes, P ignored, readable/writable segment and privilege checks. Real/V86 and illegal LOCK raise #UD. `verif/sys/tests/pverrw/` distinguishes differential and Intel-spec witnesses. |
-| MOV CRn / MOV DRn | 0F 20/22, 0F 21/23 | IMPLEMENTED (DRn system-mode gated) | `SYS_MOVCR_*` (`core.sv:1116-1136`) |
-| RSM | 0F AA | IMPLEMENTED (only inside SMM) | `d_rsm` (`core.sv:1104-1106`) |
-| Jcc rel16/32 | 0F 80–8F | IMPLEMENTED | `core.sv:1138` |
-| SETcc r/m8 | 0F 90–9F | IMPLEMENTED | `core.sv:1154` |
-| MOVZX / MOVSX | 0F B6/B7/BE/BF | IMPLEMENTED | `core.sv:1164` |
-| IMUL r,r/m | 0F AF | IMPLEMENTED (native `*`) | `K_IMUL2` (`core.sv:1175`) |
-| BSF / BSR | 0F BC/BD | IMPLEMENTED | `core.sv:1197` |
-| BSWAP | 0F C8–CF | IMPLEMENTED | `core.sv:1217` |
-| CMPXCHG r/m,r | 0F B0/B1 | IMPLEMENTED | `K_CMPXCHG` (`core.sv:1233`) |
-| UD2 | 0F 0B | IMPLEMENTED (system: delivers #UD; user: HALT) | `d_ud2` (`core.sv:1277`) |
-| BT/BTS/BTR/BTC reg `0F A3/AB/B3/BB`, imm `0F BA` | 0F A3.. / 0F BA | Legal register and memory forms IMPLEMENTED; reserved `0F BA /0..3` incorrectly accepted | `decode_stages.sv` signed register-index EA and modulo immediate selection; memory RMW CF commits on final `S_STORE` ACK. `t_bitmem` + `pbitmem` regression cases. |
-| SHLD / SHRD | 0F A4/A5/AC/AD | PARTIAL — register destination IMPLEMENTED; **memory destination HALTs** | `mod!=11` sets `d_unknown` (`core.sv:1213`) |
-| CPUID | 0F A2 | PARTIAL — IMPLEMENTED only under co-sim (`cosim_en`); HALT otherwise | `core.sv:1267-1271` |
-
-### Two-byte `0F` HALT (deferred) gaps
-
-| Mnemonic | Opcode | Why it HALTs |
-| --- | --- | --- |
-| SLDT / STR / LLDT / LTR memory forms | 0F 00 /0..3, mem | Only register forms are implemented for /0..3; `decode_stages.sv` group0F00 rejects their memory forms. VERR/VERW memory forms are implemented. |
-| SMSW / LMSW (and other `0F 01` subforms) | 0F 01 /4,/6,... | not LGDT/LIDT → `d_unknown` (`core.sv:1114`) |
-| CMPXCHG8B | 0F C7 /1 | both reg and mem forms `d_unknown`; reg-dst also tagged `d_f00f` for Erratum 81 (`core.sv:1252-1254`) |
-| SHLD / SHRD **memory dst** | 0F A4/A5/AC/AD mem | `mod!=11` → `d_unknown` (`core.sv:1213`) |
-| All other `0F xx` (incl. MMX, MSR access, NOP-`0F 1F`, etc.) | various | two-byte `default` `d_unknown` (`core.sv:1281`) |
-
-Note: `INT3/INT n/INTO/IRET` and `MOV DRn` HALT specifically in **user mode**
-(no IDT / not a user instruction) but are IMPLEMENTED in system mode; they are
-listed PARTIAL above rather than as unconditional gaps.
+| `SLDT` / `STR` / `LLDT` / `LTR` | `0F 00 /0../3` | **PARTIAL (reg implemented; mem HALT)** | Register forms implemented in system mode; memory forms set `d_unknown` (HALT). |
+| `VERR` / `VERW` | `0F 00 /4, /5` | **IMPLEMENTED** | Register and memory word forms in protected mode (`S_DQUERY`, `pverrw` gate; `#UD` in real/V86). |
+| `SGDT` / `SIDT` / `LGDT` / `LIDT` / `INVLPG` | `0F 01 /0../3, /7` | **IMPLEMENTED** | 16/32-bit operand-size aware (`LGDT` 24-bit mask in `o16`); `INVLPG` flushes I/D TLBs. |
+| `SMSW` / `LMSW` | `0F 01 /4, /6` | **PARTIAL** | `SMSW r16/r32` (`mod==11`) implemented; `SMSW m16` and `LMSW` set `d_unknown` (HALT). |
+| `LAR` / `LSL` | `0F 02` / `0F 03` | **IMPLEMENTED** | Protected-mode register & memory word selector forms (`S_DQUERY`, `plar` gate). |
+| `CLTS` | `0F 06` | **IMPLEMENTED** | CPL0 clear `CR0.TS` (`#GP(0)` if `CPL > 0`). |
+| `INVD` / `WBINVD` | `0F 08` / `0F 09` | **IMPLEMENTED (SoC/cosim)** | CPL0 privilege-checked (`d_cacheinv`); HALT in user-only TB. |
+| `UD2` | `0F 0B` | **IMPLEMENTED** | Delivers `#UD` (vector 6) in system mode; loud HALT in user-only TB. |
+| `MOV CRn` (`CR0`,`CR2`,`CR3`,`CR4`) & `MOV DRn` (`DR0`–`DR7`) | `0F 20`–`0F 23` | **IMPLEMENTED** | Register-only (`mod!=11` or invalid `CR1`/`CR5`–`CR7` raises `#UD`); `DR4`/`DR5` alias or `#UD` per `CR4.DE`; `DR7.GD` `#DB` supported. |
+| `RDTSC` & `CPUID` | `0F 31`, `0F A2` | **IMPLEMENTED (SoC/cosim)** | 64-bit cycle counter (`EDX:EAX`) and Pentium Family-5 `CPUID` leaf table (`psoccpuid`); HALT in user-only TB. |
+| `WRMSR` / `RDMSR` | `0F 30` / `0F 32` | **HALT (deferred)** | Unimplemented (`d_unknown = 1'b1`). |
+| `Jcc rel16/rel32` & `SETcc r/m8` | `0F 80`–`9F` | **IMPLEMENTED** | `0F 8x` fast-pathed (`PV`) in 32-bit mode and `o16`-aware (`rel16`) in real/16-bit mode. |
+| `PUSH`/`POP` `FS`/`GS` | `0F A0`/`A1`/`A8`/`A9` | **IMPLEMENTED** | Real, V86, and protected-mode descriptor-checked loads. |
+| `BT` / `BTS` / `BTR` / `BTC` (`r` & `imm8`) | `0F A3`/`AB`/`B3`/`BB`, `0F BA` | **IMPLEMENTED** | Register and bit-offset memory RMW forms (`t_bitmem`, `pbitmem`; note `0F BA /0..3` reserved sub-encodings are not rejected). |
+| `SHLD` / `SHRD` (`imm8` & `CL`) | `0F A4`/`A5`/`AC`/`AD` | **IMPLEMENTED** | Both register and memory-RMW destinations implemented. |
+| `RSM` | `0F AA` | **IMPLEMENTED (SMM)** | Restores P5 SMRAM state map inside SMM (`psmm`); HALT outside SMM. |
+| `IMUL r, r/m` | `0F AF` | **IMPLEMENTED** | 2-operand signed multiply (`K_IMUL2`). |
+| `CMPXCHG r/m, r` & `XADD r/m, r` | `0F B0`/`B1`, `0F C0`/`C1` | **IMPLEMENTED** | Register and memory RMW forms (`LOCK`-legal on memory). |
+| `LSS` / `LFS` / `LGS` | `0F B2` / `B4` / `B5` | **IMPLEMENTED** | Far-pointer GPR + segment loads across real, V86, and protected modes. |
+| `MOVZX` / `MOVSX` | `0F B6`/`B7`/`BE`/`BF` | **IMPLEMENTED** | 1-cycle `S_PIPE` fast-path loads (`NP` per AP-500) + slow FSM. |
+| `BSF` / `BSR` & `BSWAP r32` | `0F BC`/`BD`, `0F C8`–`CF` | **IMPLEMENTED** | Bit scan and byte-reverse GPR operations. |
+| `CMPXCHG8B m64` | `0F C7 /1` | **IMPLEMENTED** | 64-bit memory compare-exchange (`K_CX8B`); illegal `LOCK CMPXCHG8B reg` models Pentium `F00F` Erratum 81 when `errata_en[ERR_F00F]` is set. |
+| Post-P54C extensions (`CMOVcc`, MMX, `RDPMC`, `SYSCALL`, `0F 1F` NOP) | various `0F xx` | **UNIMPLEMENTED (non-P54C)** | Intentionally out of P5/P54C scope (`#UD` or loud HALT). |
 
 ---
 
-## x87 FPU (escapes D8–DF)
+## 3. x87 Floating-Point Unit (`D8`–`DF`, `fp_shared/ven_fp_top.sv`)
 
-x87 is bit-exact-vs-QEMU for **normal finite values and signed zero at the
-default 64-bit precision / round-to-nearest** (`rtl/fpu/fpu_x87_pkg.sv:3-22`).
-Out-of-corpus inputs (Inf / NaN / denormal results, non-default RC/PC) are not
-guaranteed bit-exact, and the affected decode paths HALT rather than emit a
-wrong answer (Tier-3 deferral, `docs/m3-fpu-spec.md`).
+Under the production **`VEN_FP_SHARED` + `VEN_TRANSCENDENTAL` + `VEN_FPREM` + `VEN_BCD_ITER` + `VEN_SRT_ITER`** profile (`c0e3fe43`), Ventium implements the complete Pentium P54C x87 instruction set (save for `FXTRACT` `D9 F4`), including all rounding (`RC`) and precision (`PC24`/`PC53`/`PC64`) modes, architectural `C1` round-direction and stack-fault semantics, delayed `#MF` exception reporting, and `CR0.EM`/`MP`/`TS` (`#NM`) traps:
 
-| Family | Status | Evidence (core.sv) |
+| x87 Family | Status in Production (`VEN_FP_SHARED`) | Notes |
 | --- | --- | --- |
-| FLD/FST/FSTP m32/m64/m80, FLD/FST st(i), FXCH | IMPLEMENTED | `core.sv:1879-1986` |
-| FILD/FIST/FISTP m16/m32/m64 | IMPLEMENTED | `core.sv:1926-2022` |
-| FADD/FSUB/FMUL/FDIV (+R, +P, m32/m64/i16/i32, st(i)) | IMPLEMENTED (slow-path `f_eval` helper — modeled by effect) | `FX_AR_*` (`core.sv:1865,1948,1960`); exec `f_eval` at `core.sv:4044,4155-4172`, arm `core.sv:4166` |
-| FSQRT | IMPLEMENTED | `core.sv:1907` |
-| FCOM/FCOMP/FCOMPP/FUCOM/FUCOMPP/FICOM, FTST, FXAM | IMPLEMENTED | `core.sv:1874,1917,1921,1982,1996` |
-| FCHS/FABS, FLD1/FLDZ/FLDPI/... constants, FNOP, FINCSTP/FDECSTP, FFREE | IMPLEMENTED | `core.sv:1894-1906,1978` |
-| FLDCW/FNSTCW, FNCLEX/FNINIT, FNSTSW AX/m16 | IMPLEMENTED | `core.sv:1885-1886,1938-1939,1973,2020` |
-
-### x87 HALT (deferred) gaps
-
-The **8 transcendentals** `F2XM1/FYL2X/FPTAN/FPATAN/FYL2XP1/FSINCOS/FSIN/FCOS`
-(D9 F0/F1/F2/F3/F9/FB/FE/FF) are **IMPLEMENTED under `+VEN_TRANSCENDENTAL`** (M11/#11,
-`docs/m11-transcendental-spec.md`): iterative microcoded engines, Group B bit-exact vs
-qemu-i386 and Group A bit-exact vs a shared-poly silicon model. They still appear below
-because the **DEFAULT build leaves them `d_unknown` → HALT** (so it stays byte-identical;
-the gate is opt-in). Likewise BCD `FBLD`/`FBSTP` are IMPLEMENTED (M10) but the table is
-the *default-build* HALT set.
-
-| Mnemonic | Opcode | Why it HALTs |
-| --- | --- | --- |
-| FLDENV / FNSTENV | D9 /4,/6 | `default d_unknown` (`core.sv:1887`) |
-| Transcendentals F2XM1/FYL2X/FPTAN/FPATAN/FYL2XP1/FSINCOS/FSIN/FCOS | D9 F0–FF | implemented under `+VEN_TRANSCENDENTAL`; default build `d_unknown` (`core.sv:2024`) |
-| FSCALE / FPREM / FPREM1 / FRNDINT / FXTRACT | D9 F4/F5/F7/F8/FC/FD, D9 F1… | still deferred — `default d_unknown` |
-| FCMOVcc / FCOMI / FUCOMI | DA/DB reg forms | `d_unknown` (`core.sv:1922,1940`) |
-| FRSTOR / FSAVE / FNSAVE | DD /4,/6 | `default d_unknown` (`core.sv:1974`) |
-| FBLD / FBSTP (BCD FP) | DF /4,/6 | IMPLEMENTED (M10, `FX_FBLD`/`FX_FBSTP`) — listed for the default-build boundary |
-| Any other escape sub-form (Inf/NaN/denormal-producing or non-default RC/PC paths) | D8–DF | per-escape `default d_unknown`; `if (d_unknown) d_is_x87=1'b0` (`core.sv:2026`) |
-
----
-
-## Test coverage of the boundary
-
-Implemented families are exercised by the differential corpus under
-`verif/tests/` (e.g. `t_mul`, `t_div`, `t_string`, `t_callret`, `t_stack`,
-`t_cmpxchg`, `t_shld`, `t_bit`, and the `tx_*` x87 suite) and by the system
-gates under `verif/sys/tests/`. Per `REVIEW_Jun5.md` recommendation 4, the HALT
-boundary should also gain focused tests asserting the documented HALT for the
-deferred opcodes above so the coverage edge stays machine-checkable.
+| `FLD`/`FST`/`FSTP` (`m32`/`m64`/`m80`/`ST(i)`), `FXCH`, `FFREE`, `FINCSTP`/`FDECSTP`, `FNOP` | **IMPLEMENTED** | Zero-cycle `FXCH` rename queue (`ven_fp_fxch_queue`), exact `C1` & unmasked store range suppression. |
+| `FILD` / `FIST` / `FISTP` (`m16`/`m32`/`m64`) & `FBLD` / `FBSTP` (`m80` BCD) | **IMPLEMENTED** | Pre-probed store atomicity (`make fpstore`); iterative `ven_bcd` / `ven_bcd_to_fp` (`-0.0` sign preserved). |
+| `FADD`/`FSUB`/`FSUBR`/`FMUL` (`ST(i)`, `+P`, `m32`/`m64`, `FI*` `m16`/`m32`) | **IMPLEMENTED** | Pipelined `ven_fp_alu` with exact IEEE-754 rounding & `C1` direction. |
+| `FDIV`/`FDIVR` (`+P`, `m32`/`m64`, `FIDIV*`), `FSQRT`, `FPREM`, `FPREM1` | **IMPLEMENTED** | Unified radix-4 SRT engine (`fpu_srt_div`, `+VEN_FPREM`), optional Erratum 23 (`FDIV` bug). |
+| `FCOM`/`FCOMP`/`FCOMPP`, `FUCOM`/`FUCOMP`/`FUCOMPP`, `FICOM`/`FICOMP`, `FTST`, `FXAM` | **IMPLEMENTED** | Full unordered/NaN/zero/denormal classification. |
+| `FCHS`, `FABS`, `FLD1`/`FLDL2T`/`FLDL2E`/`FLDPI`/`FLDLG2`/`FLDLN2`/`FLDZ`, `FRNDINT`, `FSCALE` | **IMPLEMENTED** | Shared converter in `ven_fp_misc`. |
+| `FLDCW`/`FNSTCW`, `FNSTSW AX`/`m16`, `FNCLEX`/`FNINIT`, `FLDENV`/`FNSTENV`, `FRSTOR`/`FNSAVE` | **IMPLEMENTED** | All four 14/28/94/108-byte real & protected-mode memory layouts. |
+| Transcendentals: `F2XM1`, `FYL2X`, `FYL2XP1`, `FPATAN`, `FSIN`, `FCOS`, `FSINCOS`, `FPTAN` | **IMPLEMENTED (`+VEN_TRANSCENDENTAL`)** | `ven_fp_trans` shared polynomial sequencer (gated off only in bare minimal user-TB builds). |
+| `FXTRACT` (`D9 F4`) | **HALT (deferred)** | Unimplemented (`d_unknown = 1'b1`). |
+| P6+ `FCMOVcc` / `FCOMI` / `FUCOMI` (`DA`/`DB` reg) | **UNIMPLEMENTED (non-P54C)** | P6 instructions absent on real Pentium P54C. |

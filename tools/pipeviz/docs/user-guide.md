@@ -599,8 +599,8 @@ Fibonacci recurrences. Build it and open the resulting ELF:
 gcc -m32 -march=pentium -O2 -ffreestanding -fno-pic -fno-pie \
   -fno-stack-protector -nostdlib -static -Wl,--build-id=none \
   -Wl,-Ttext=0x08048000 -Wl,-e,_start -DDUAL=1 \
-  -o /tmp/fibonacci_dual.elf tools/pipeviz/examples/fibonacci_uv.c
-tools/pipeviz/run.sh /tmp/fibonacci_dual.elf
+  -o "${TMPDIR:-/home/yukidama/external/tmp}/fibonacci_dual.elf" tools/pipeviz/examples/fibonacci_uv.c
+tools/pipeviz/run.sh "${TMPDIR:-/home/yukidama/external/tmp}/fibonacci_dual.elf"
 ```
 
 First untick **U/V issue**, apply/reset, and advance 600 clocks: every retirement
@@ -736,7 +736,7 @@ visual regression sweep (including all analysis tabs and PNG captures), run:
 
 ```sh
 QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
-  tools/pipeviz/gen_review_shots.py /tmp/pipeviz_review
+  tools/pipeviz/gen_review_shots.py "${TMPDIR:-/home/yukidama/external/tmp}/pipeviz_review"
 ```
 
 The optional `test386` workload needs a current `libventium_viz_soc.so` built

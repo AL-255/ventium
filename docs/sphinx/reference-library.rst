@@ -1,314 +1,105 @@
 ==========================================
-References
+References & Verification Oracles
 ==========================================
 
-Ventium is reconstructed entirely from **public sources**: Intel's period
-manuals, datasheets and errata; the academic and trade literature on the P5
-microarchitecture; independent timing measurements; die-photo reverse
-engineering; and open-source emulators used as differential oracles. This page
-catalogs that material — what each source is, why the project needs it, and
-where it lives.
+Ventium is reconstructed from **public architectural, timing, and silicon
+reverse-engineering sources**: Intel's period Pentium manuals, datasheets, and
+specification updates; academic and trade microarchitecture analyses;
+independent instruction-timing measurements; die-photo reverse engineering; and
+open-source IA-32 emulators used as differential oracles.
 
-A standing caveat, stated up front in the library's own ``REF.md``: **true RTL
-accuracy is not achievable from public sources alone.** Intel never published
-RTL, microcode listings, the validation database, the scoreboard logic, or every
-erratum-triggering corner case. What the public record *does* support — and what
-Ventium targets — is an **ISA-compatible, cycle/microarchitecture-approximate**
-replica of a chosen stepping (P5/P54C, non-MMX), validated by differential
-testing rather than by claiming gate-level fidelity.
+Official Ventium source code and hardware releases are published at
+`https://github.com/AL-255/ventium <https://github.com/AL-255/ventium>`_
+(`Releases <https://github.com/AL-255/ventium/releases>`_).
 
+.. note::
 
-The archive: ``ventium-refs``
-=============================
+   **Scope & Submodule Boundary:** Intel never published P5 RTL, microcode ROM
+   listings, or internal validation vectors. Ventium targets an
+   **ISA-compatible, cycle- and microarchitecture-faithful** synthesizable
+   reconstruction of the non-MMX Pentium (P5/P54C, Family 5), governed by
+   instruction-by-instruction differential lockstep against a pinned QEMU
+   Pentium oracle and physical FPGA standard-suite qualification.
 
-The bulk of the cited material is snapshotted in the **``ventium-refs`` git
-submodule** (~220 MB of PDFs/HTML, layout mirroring the numbered sections of
-``REF.md``). Three files anchor it:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 78
-
-   * - File
-     - Role
-   * - ``REF.md``
-     - The annotated bibliography and acquisition strategy — *why* each class of
-       source matters and what behaviour it pins down. The authoritative
-       narrative; the numbered sections below follow it.
-   * - ``MANIFEST.md``
-     - The on-disk catalog: every archived file, its ``REF.md`` row, and its
-       original source URL (re-fetchable; verify with ``sha256sum -c
-       CHECKSUMS.txt``).
-   * - ``00-index/INDEX.md``
-     - A **page-referenced** "abstracted index" of every PDF (~240 KB total) with
-       a *Find by topic* map, so an agent can locate the right document and page
-       without loading multi-MB PDFs.
-
+   The ``ventium-refs`` submodule cited below is a **private maintainer
+   archive** holding the pinned QEMU oracle and reference PDFs for the
+   ``experimental/uv-fast-ipc-apr`` differential harness — it is **never
+   required** to clone, verify, or synthesize the self-contained public ``main``
+   FPGA release (``fpga/known_good_c0e3fe43.json`` / ``fpga/build_known_good.py``).
 
 §1 — Canonical Intel documentation
 ==================================
 
-Ground truth for the ISA and the part's published behaviour.
-
 .. list-table::
    :header-rows: 1
    :widths: 40 60
 
-   * - Document (archive filename)
-     - Why it is needed
+   * - Document
+     - Architectural Role in Ventium
    * - **Pentium Processor Family Developer's Manual** Vol 1/2/3 (Jul 1995,
-       ``241428/241429/241430-004``) and the **1997 combined** manual
-     - Core architecture, the PF/D1/D2/EX/WB pipeline, U/V pairing, caches, TLBs,
-       pins, bus cycles, x87, performance counters, APIC/SMM/debug. Vol 2 covers
-       the 82496/82497 + 82491/82493 external L2 cache chipset; Vol 3 is the
-       ISA-visible execution environment.
-   * - **1995 Pentium Processors and Related Components** data book
-     - 61 MB superset of Vol 1 + datasheets + app notes for that vintage.
-   * - **Pentium Processor datasheet** (``241997-010``, + hi-res scan)
-     - Pin-level bus protocol: ``ADS#``, ``BRDY#``, ``NA#``, ``KEN#``,
-       ``CACHE#``, ``HITM#``, ``LOCK#``, ``M/IO#``, ``D/C#``, ``W/R#``, reset/
-       INIT/BIST, AC/DC timing.
+       ``241428/241429/241430-004``) & **1997 Combined Manual**
+     - ``PF``/``D1``/``D2``/``EX``/``WB`` pipeline stages, U/V pairing rules,
+       split 8 KiB L1 caches, TLBs, 64-bit P5 bus cycles, x87 FPU, SMM, and
+       execution environment.
+   * - **Pentium Processor Datasheet** (``241997-010``)
+     - Pin-level 64-bit external bus protocol (``ADS#``, ``BRDY#``, ``NA#``,
+       ``KEN#``, ``CACHE#``, ``HITM#``, ``LOCK#``, ``AHOLD``, ``BOFF#``) modeled
+       in ``rtl/bus/biu_p5.sv``.
    * - **Pentium Specification Updates** (``242480-022``, ``242480-041`` final
-       P54C, ``243185-004`` P55C/MMX)
-     - Mandatory: errata are part of "accurate" behaviour. ``242480-022`` is the
-       direct source for the FDIV (Erratum 23), FIST (20), MOV-``moffs`` (59) and
-       F00F (81) models; ``-041`` is the final P54C roll-up.
-   * - **IA-32 Software Developer's Manual** — 1997 (``243190/91/92-001``) and
-       current (``325462``, 2025-02)
-     - Period-correct IA-32 semantics, cross-checked against the modern SDM.
-   * - **Intel MultiProcessor Specification v1.4**
-     - Local-APIC / IO-APIC / MP-table behaviour for OS-visible MP correctness.
+       P54C)
+     - Authoritative source for optional P54C errata models: FDIV (Erratum 23),
+       FIST overflow (Erratum 20), MOV-``moffs`` pairing (Erratum 59), and F00F
+       lock-up (Erratum 81).
+   * - **IA-32 Software Developer's Manual** (1997 ``243190/91/92-001`` & modern
+       SDM)
+     - Protected-mode segmentation, 4 KiB / 4 MiB paging, task switching, call
+       gates, V86 mode, and precise exception precedence.
 
-
-§2 — Pipeline and internal-structure sources
-============================================
-
-The most important sources for reconstructing the *microarchitecture*.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 60
-
-   * - Source
-     - What it reveals
-   * - **Pentium Developer's Manual, Chapter 2** (in §1 above)
-     - The canonical statement of the five integer stages, U/V pipes, the
-       "simple-instruction" pairing rules, the four-state BTB predictor and
-       mispredict penalties, and the eight-stage FPU pipeline + FXCH pairing.
-   * - **Alpert & Avnon, "Architecture of the Pentium Microprocessor", IEEE
-       Micro 1993** (``alpert-avnon-…``)
-     - Intel-authored overview with implementation clues — the 256-entry,
-       four-way BTB, branch-update timing, V-pipe branch pairing.
-   * - **Microprocessor Report, "Intel Reveals Pentium Implementation Details",
-       1993** (``mpr-pentium-implementation-1993``)
-     - Secondary source on early P5 internals, pairing exceptions, rationale.
-   * - **RTL Engineering — P5/Pentium microarchitecture video transcripts**
-       (``rtl-engineering-transcripts/``)
-     - Independent deep-dives that reconstruct the P5/MMX front end from the
-       public record: the U/V dual decoder, the 1-byte length guess + length
-       cache, ``0F``-as-prefix handling, U/V pairability, the eight-stage FPU with
-       FXCH pairing, and the FDIV/integer overlap ("early-exception" logic) that
-       made Quake fast on the P5. Secondary analysis — speculative where Intel
-       never disclosed internals — cross-checked against §1–§3; the basis for the
-       cycle-model fidelity notes in ``rtl-engineering-transcripts/
-       _GAPS_vs_ventium.md``.
-
-The archived transcripts correspond to these videos (channel:
-`@RTLEngineering <https://www.youtube.com/@RTLEngineering>`_). The P5/Pentium
-and x86 front-end titles most relevant to Ventium:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 52 48
-
-   * - Video
-     - What it covers
-   * - `x86 Front End Complexity, Part 1 — Pentium P5
-       <https://www.youtube.com/watch?v=Ju8BTMJb5Kc>`_
-     - The dual U/V decoders, the 1-byte length guess + length cache, prefetch
-       buffers, AGI/prefix costs — the front-end model behind the §3 pairing
-       table.
-   * - `x86 Decoding Simulation in the Pentium P5
-       <https://www.youtube.com/watch?v=f--MBGeVSSg>`_
-     - Cycle-by-cycle P5 decode: ``0F``-as-prefix, V-decoder prefix accumulation,
-       length-cache priming on loops (also the F00F front-end mechanism).
-   * - `x86 Decoding Simulation in the 486
-       <https://www.youtube.com/watch?v=O3ZVStCbOd4>`_
-     - The 3-byte 486 decoder baseline the P5 builds on.
-   * - `Quake, Floating Point, and the Intel Pentium
-       <https://www.youtube.com/watch?v=DWVhIvZlytc>`_
-     - Why Quake flew on the P5: free FXCH pairing and the FDIV/integer overlap
-       ("early-exception" logic) — the basis for the cycle-model gap notes.
-   * - `MicroOps in the Pentium MMX
-       <https://www.youtube.com/watch?v=4SV2GNbZf50>`_
-     - Temporal vs spatial micro-op packing; P5/MMX two-issue scheduling.
-   * - `x86 Front End Complexity, Part 2 — Pentium MMX
-       <https://www.youtube.com/watch?v=7xBKHGLMkr4>`_
-     - The MMX predecoder + transparent FIFO (out of scope for P54C; a useful
-       delta).
-   * - `x86 Decoding Simulation in the Pentium MMX
-       <https://www.youtube.com/watch?v=0KBocdVHjIc>`_
-     - MMX ``0F``-as-opcode dual decode.
-   * - `Pentium MMX Predecoding in a FPGA
-       <https://www.youtube.com/watch?v=smBkt2vFKWo>`_
-     - An FPGA mapping of the MMX-era predecoder.
-
-The channel's MIPS/VR4300/N64/GPU deep-dives are archived in the same directory
-but are off-core for Ventium.
-
-
-§3 — Optimization guides and timing tables
-==========================================
-
-Where latency/throughput numbers leak internal structure — the basis for the
-cycle-accurate model and the AP-500 pairing table.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 60
-
-   * - Source
-     - Why it matters
-   * - **AP-500 / 241799**, *Optimizations for Intel's 32-Bit Processors* (rev
-       001 & 002)
-     - The primary pairing/timing source: U/V pipes, cache banks, BTB penalties,
-       prefetch buffers, AGI stalls, prefix costs, alignment penalties, FPU
-       scheduling, with concrete cycle-count examples.
-   * - **AP-526 / 242816-003(a)**, *Intel Architecture Optimization Manual*
-     - Later, broader latency/throughput and pairability tables.
-   * - **Intel MMX Technology Developer's Manual** (``243006-001``)
-     - MMX pipeline / relaxed pairing (only needed for a P55C target).
-   * - **Agner Fog — instruction tables + microarchitecture guide**
-     - Independent *measured* latencies, throughputs, pairability and pipe
-       restrictions — invaluable cross-checks on the Intel numbers.
-   * - **Granlund / GMP x86 timing tables**
-     - Further independent integer latency/throughput measurements.
-
-
-§4 — Performance-counter and measurement methodology
-====================================================
-
-No external artifacts — methodology only (``RDTSC``, the ``CTR0``/``CTR1`` /
-``CESR`` performance counters, logic-analyzer capture). The event lists live in
-the Developer's Manual Vol 1; this section is the placeholder for Ventium's own
-microbenchmark harness and trace captures.
-
-
-§5 — Die photos and silicon reverse engineering
-===============================================
-
-Used for floorplanning, ROM/PLA contents and block-level sanity checks — *not*
-as a substitute for behavioural validation.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 60
-
-   * - Source
-     - Use
-   * - **Ken Shirriff's Pentium articles** (righto.com)
-     - Standard-cell library (P54C, 600 nm, 4 metal layers), the FPU Kogge-Stone
-       carry-lookahead adder, the FPU constant ROM, microcode circuitry, and —
-       central to this project — the **reverse-engineered SRT division PLA** and
-       the FDIV bug. Archived: ``shirriff-pentium-standard-cells.html``,
-       ``shirriff-pentium-carry-lookahead.html``.
-   * - **CPU Museum / Wikimedia P54C die photos**
-     - High-resolution die/floorplan references for the cache arrays, FPU,
-       integer datapaths and control ROMs.
-   * - **Patents** (e.g. ``US5970235A`` pre-decoded instruction cache)
-     - Design-background evidence on parallel x86 decode, the BTB, the divider —
-       suggestive, not proof of the exact implementation.
-
-
-§6 — Emulators and decoders (differential oracles)
-==================================================
-
-Functional references, **not** timing references. These are live upstream
-projects (pulled at build/test time, not archived); see
-``06-emulators-decoders/SOURCES.md``.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 26 74
-
-   * - Project
-     - Role in Ventium
-   * - **QEMU (TCG)**
-     - The primary differential oracle. Every Ventium gate runs a program on the
-       RTL and on ``qemu -cpu pentium`` / ``qemu-system-i386`` and asserts
-       bit-identical architectural (and, in cycle mode, retire) state.
-   * - **Bochs**
-     - Interpretable IA-32 functional reference from the 386 onward.
-   * - **Intel XED · Capstone · Zydis**
-     - Encode/decode oracles for differential decoder testing.
-   * - **86Box · PCem · MAME · UniPCemu · DOSBox-X**
-     - PC-platform (BIOS/chipset/VGA/PIC/PIT/RTC) behaviour references for the
-       SoC peripherals.
-   * - **K x86-64 semantics · Intel SDE**
-     - Formal user-mode semantics / a modern Intel emulator, for ISA cross-checks
-       (not Pentium-timing accurate).
-
-
-§7 — Test suites
-================
-
-External and self-built conformance corpora. Beyond the project's own
-differential corpus (decoder, ISA, x87, microarch-timing, bus/protocol
-categories), the archive vendors:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 26 74
-
-   * - Suite
-     - Role
-   * - **test386.asm** (``09-external-cpu-tests/``)
-     - A standalone 80386+ CPU tester that runs as a BIOS replacement. Ventium's
-       ``test386`` SoC gate boots it on ``ventium_soc`` and diffs it byte-for-byte
-       against ``qemu-system-i386`` (GPL-3.0; source vendored in the archive).
-   * - **P5 emulation harness** (``07-p5-emulation-harness/``)
-     - A reproducible "golden reference" environment that runs P5/P54C code,
-       enforces the P5-only instruction set, estimates Pentium clock cycles, and
-       drives a benchmark suite — **CoreMark, Dhrystone, Whetstone, STREAM,
-       LINPACK** plus integer ``kernels`` and a ``microbench`` (SPEC95 is a
-       placeholder). It now also carries two endurance workloads. **Quake**
-       (``quake/``): a TyrQuake P5 build — shareware Quake running on the emulator
-       with the P5-clean x86-assembly path enabled. **Windows 95**
-       (``win95/``): an automated unattended install plus a ``C:\SW`` workload
-       library (``software.sh`` / ``SOFTWARE.md``) that injects shareware games
-       (DOOM, Wolfenstein 3D, Heretic, Jazz Jackrabbit — fixed-point integer 3D)
-       and 2D/3D CAD apps (ProDesign II, RAD CAD — x87-FPU geometry) to exercise
-       wide swaths of the ISA, driven headless over the QEMU monitor / VNC.
-       Supporting tools (``tools/``) include a static ISA verifier
-       (``isa_verify.py``) and a resynchronizing trace comparator
-       (``trace_compare.py``). The functional + cycle-estimate layer that must be
-       right before the RTL can be checked against it — honest about stopping
-       short of bus/errata/stepping accuracy.
-
-
-§8 — RTL implementation and verification stack
+§2 — Pipeline and microarchitecture literature
 ==============================================
 
-The tooling the replica is built and checked with:
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
 
-* **SystemVerilog** RTL with a strict architectural-state model.
-* **Verilator** for fast simulation (the ``make verify`` / ``verify-soc`` /
-  ``verify-srt`` gates); Icarus/commercial simulators for compatibility.
-* A **differential harness** against QEMU (and XED/Bochs) plus a golden trace
-  format: retired instruction, EIP, EFLAGS, GPRs, segment-hidden state,
-  CRx/DRx/MSRs, full x87 state, and the bus-cycle trace.
-* A **high-precision FP oracle** (SoftFloat / MPFR-style) for x87 — necessary
-  because 80-bit ``floatx80`` behaviour is *not* the same as C ``double``.
+   * - Source
+     - Contribution
+   * - **Alpert & Avnon, "Architecture of the Pentium Microprocessor"**, *IEEE
+       Micro* (1993)
+     - Dual-issue U/V datapath structure, **256-entry 4-way BTB**, branch
+       resolution timing, and V-pipe branch pairing.
+   * - **Microprocessor Report, "Intel Reveals Pentium Implementation Details"**
+       (1993)
+     - Early P5 decode, prefix, and pairing corner cases.
+   * - **RTL Engineering — Pentium P5 / x86 Front-End Analyses**
+       (`@RTLEngineering <https://www.youtube.com/@RTLEngineering>`_)
+     - Independent public-record analyses of P5 variable-length dual decode
+       (`Part 1 <https://www.youtube.com/watch?v=Ju8BTMJb5Kc>`_,
+       `Decode Sim <https://www.youtube.com/watch?v=f--MBGeVSSg>`_) and Quake's
+       overlapped x87/integer execution (`Quake & Pentium FPU
+       <https://www.youtube.com/watch?v=DWVhIvZlytc>`_).
 
+§3 — Optimization guides and measured timing tables
+===================================================
 
-Sources for the SRT divider / FDIV-bug work
-===========================================
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
 
-The genuine radix-4 SRT divider (see :doc:`microarch/srt-divider`) was built
-from the §5 reverse-engineering line plus the formal SRT literature. These are
-the specific sources used; the two recent ones are not in the snapshot (pull as
-needed, per ``MANIFEST.md``'s note that "Shirriff has more on the Pentium (FDIV
-bug, …)"):
+   * - Source
+     - Contribution
+   * - **Intel AP-500 / 241799**, *Optimizations for Intel's 32-Bit Processors*
+     - Primary U/V pairing classification (``UV`` / ``PU`` / ``PV`` / ``NP``),
+       L1D bank conflict rules, AGI interlocks, prefix penalties, and ``FXCH``
+       scheduling.
+   * - **Intel AP-526 / 242816-003**, *Intel Architecture Optimization Manual*
+     - Expanded integer and x87 latency/throughput tables.
+   * - **Agner Fog — Instruction Tables & Microarchitecture Guide** &
+       **Granlund / GMP x86 Timing Tables**
+     - Independent silicon cycle-count cross-checks on Pentium P5/P54C hardware.
+
+§4 — Die-photo reverse engineering & SRT division mathematics
+=============================================================
 
 .. list-table::
    :header-rows: 1
@@ -316,21 +107,42 @@ bug, …)"):
 
    * - Source
      - Contribution
-   * - Ken Shirriff, *"Intel's $475 million error: the silicon behind the Pentium
-       division bug"* (righto.com, Dec 2024)
-     - The die-photo reverse engineering of the quotient-selection PLA: radix-4,
-       digit set ``{-2,-1,0,1,2}``, the 7-bit (``pppp.ppp``) × 5-bit (``1.dddd``)
-       index, the carry-save "one cell low" effect, and the five missing ``+2``
-       entries.
-   * - Alan Edelman, *"The Mathematics of the Pentium Division Bug"*, SIAM Review
-       39(1), 1997
-     - The formal model: the recurrence and ``|p| ≤ (8/3)d`` bound, the
-       quotient-selection table generator, the ones-complement carry-save
-       datapath, the ``8·P_Bad ∈ {23,27,31,35,39}`` bad cells, the "six
-       consecutive ones" divisor condition, and the "≥9 steps to failure" result.
-   * - Coe & Tang, *"It Takes Six Ones to Reach a Flaw"* (1995)
-     - The original reverse-engineered model Edelman formalises (the source of the
-       bad-column values and the reachability proof).
-   * - **Intel Spec Update 242480-022** (§1 archive)
-     - The documented erratum: trigger pattern and worst-case severity (13th
-       significant bit), the anchor for the M6 runtime model.
+   * - **Ken Shirriff**, *"Intel's $475 million error: the silicon behind the
+       Pentium division bug"* (righto.com, Dec 2024) & Pentium cell/CLA articles
+     - Die-photo reverse engineering of the P54C standard-cell library, FPU
+       carry-lookahead adder, constant ROM, and radix-4 SRT quotient-selection
+       PLA (:doc:`microarch/srt-divider`).
+   * - **Alan Edelman**, *"The Mathematics of the Pentium Division Bug"*, *SIAM
+       Review* 39(1), 1997 (formalizing **Coe & Tang**, 1995)
+     - Formal carry-save SRT recurrence, ``|p| ≤ (8/3)d`` convergence interval,
+       threshold-table generator (``tools/srt/srt_model.py``), and the five
+       reachable ``8·P_Bad ∈ {23, 27, 31, 35, 39}`` flaw cells.
+
+§5 — Differential oracles, simulation & physical acceptance stack
+=================================================================
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Tool / Gate
+     - Role in Ventium Verification
+   * - **Pinned QEMU Pentium Oracle** (``ventium-refs``)
+     - Correctness authority for ``make verify`` and ``make verify-sys`` (real,
+       protected, paged, V86, SMM, and 80-bit ``floatx80`` x87 lockstep via
+       ``verif/diff/tracefmt.py`` ``.vtrace`` streams; distribution QEMU is not
+       interchangeable).
+   * - **Intel XED · Capstone · Bochs · SoftFloat**
+     - Independent instruction length/decode and 80-bit extended-precision
+       rounding cross-checks.
+   * - **Verilator 5 & Subsystem Gates**
+     - ``make verify``, ``make verify-sys``, ``make l1``, ``make bus bus-sva``,
+       ``make lint``, and full-PC ``ao486-sim/`` simulation.
+   * - **Physical RK-XCZU15EG-F Standard Acceptance Suite**
+     - Board-level qualification on ``xczu15eg-ffvb1156-2-i`` (Vivado 2025.2) in
+       mandatory ``U/V + system fast-pipe`` mode (``cycle_mode=1``): (1) both
+       4,000-iteration **CoreMark** CRC seeds, (2) cold **Windows 95 OSR2** GUI
+       desktop + PS/2 interaction + clean shutdown, and (3) cold **DOS Quake**
+       ``timedemo demo1`` (``8.0 FPS`` at ``40.000 MHz`` on image
+       ``c0e3fe43``, **0.515778001 total U+V gameplay IPC** / ``0.397847833``
+       primary/U across cycles ``28,696,827,616–32,989,404,795``).

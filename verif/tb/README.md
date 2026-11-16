@@ -1,137 +1,64 @@
-# Producer C — Verilator C++ testbench + bus-functional model
+# Producer C — Verilator C++ Testbench & Bus-Functional Models (`verif/tb/`)
 
-This directory is **Producer C** of the Ventium differential-verification stack
-(see [`../../PLAN.md`](../../PLAN.md) §4.2 and
-[`../../docs/trace-format.md`](../../docs/trace-format.md)). It verilates the RTL
-core (`rtl/ventium_top.sv`), drives its clock/reset, services its `mem_*` bus
-port from a flat preloaded memory, and emits a **functional-mode `.vtrace`** —
-one record per retired instruction — that the comparator (`verif/diff/compare.py`)
-diffs against the QEMU gdbstub golden trace (Producer A).
+`verif/tb/` is **Producer C** of the Ventium differential-verification stack (`docs/rtl-interface.md`, `docs/trace-format.md`). It verilates `rtl/ventium_top.sv` from the ordered filelist `rtl/ventium.f` (plus optional L1/AXI and CDC leaf modules), services memory and I/O in C++, and emits functional or cycle `.vtrace` files via `vtm_retire` DPI callbacks for comparison against the pinned QEMU Pentium oracle (`verif/diff/compare.py`).
 
-## Files
+## Key Source Files
 
-| file | role |
-|---|---|
-| `tb_main.cpp` | CLI + main loop: build model, load image, drive clk/rst, service bus, run-until-quiescent, finalize trace |
-| `memmodel.h` / `memmodel.cpp` | flat sparse byte-addressable RAM + the `mem_*` bus-functional model (docs/rtl-interface.md §3/§4) |
-| `dpi_retire.cpp` | implements the `vtm_retire` DPI callback (docs/rtl-interface.md §2) → emits one func `.vtrace` line per call |
-| `trace_writer.h` | tiny shared object owning the open trace file + retire counter (shared by `tb_main.cpp` and `dpi_retire.cpp`) |
-| `Makefile` | verilate + build the testbench; `selftest` target builds against the stub |
-| `selftest/ventium_top.sv` | **throwaway** stub top obeying the rtl-interface contract; retires 8 NOPs |
+| File | Role |
+| --- | --- |
+| `Makefile` | Verilator build rules (`rtl`, `l1axi`, `l1axi_kv_full`, `l1axi_full_snapshot`, `l1axi_cdc`, `rtl-sva`, `cov`, `cov-feat`, `selftest`), cgroup/lock wrapper (`tools/verilator_serial.sh`), and bounded split/parallelism controls. |
+| `tb_main.cpp` | CLI + main simulation loop: loads flat/BIOS/process images, drives `clk`/`rst_n`, services direct `mem_*` or 64-bit AXI4 (`--l1-axi`) and co-sim I/O (`--cosim`), enforces quiescence/cycle caps, and finalizes traces. |
+| `memmodel.h` / `memmodel.cpp` | Sparse 4 KiB-paged byte-addressable RAM backing both the direct `mem_*` BFM and the behavioral AXI4 DDR responder. |
+| `bfm_store_policy.h` | Drives per-byte U/V cached-store update masks on the standalone AXI BFM from the `MemModel` RAM/ROM/remap contract so ordinary RAM writes update rather than invalidate resident L1D lines. |
+| `dpi_retire.cpp` / `trace_writer.h` | Implements DPI `vtm_retire` / `vtm_retire_x87` / system-state callbacks, emitting canonical `.vtrace` records matching `verif/diff/tracefmt.py`. |
+| `syscall_emu.cpp` / `quake_image.cpp` / `win95_cosim.cpp` / `xover.cpp` | Optional M7/M14 Linux syscall proxy/emulator, user-snapshot loader, port-I/O replay co-sim, and `--public-flat-rw` state-crossover (`VEN_XOVER`) helpers. |
+| `selftest/ventium_top.sv` | Minimal standalone stub top for `make -C verif/tb selftest` (validates DPI + `tracefmt` round-trip in `obj_dir_selftest/`). |
 
-## The interface contracts (do not deviate)
+## Mandatory Build & Resource Safeguards
 
-- **Ports** (`docs/rtl-interface.md` §1, §3): `clk`, `rst_n`, and the `mem_*`
-  group (`mem_req`, `mem_we`, `mem_addr`, `mem_wdata`, `mem_wstrb`, `mem_rdata`,
-  `mem_ack`).
-- **Observation** (`§2`): the core *imports* `vtm_retire(...)` and calls it once
-  per retired instruction with post-commit architectural state. The testbench
-  *implements* it (`dpi_retire.cpp`). Verilator generates the DPI prototype into
-  `obj_dir/Vventium_top__Dpi.h`; `dpi_retire.cpp` `#include`s it when present so
-  the C types are checked against the generated prototype, with a matching
-  fallback declaration otherwise. Type mapping:
-  `longint unsigned → unsigned long long`, `int unsigned → unsigned int`
-  (uint32), `shortint unsigned → unsigned short` (uint16).
-- **Trace format** (`docs/trace-format.md` §1/§2.2): header line
-  `{"vtrace":1,"producer":"rtl","mode":"func","x87":false,"note":"..."}` then one
-  func record per retire with fields `n`, `pc`, `eax..edi`, `eflags`, `cs..gs`.
-  32-bit values are `0x%08x`, 16-bit selectors `0x%04x`, lowercase, zero-padded
-  — matching `verif/diff/tracefmt.py` exactly (the comparator parses by field
-  name).
-
-## Build & run
-
-### Against the real core (what integration uses)
+1. **Private Variant Object Directories:** `obj_dir/tb_ventium` is reserved for the canonical default build, and existing `obj_dir*` entries may be live symlinks into `external/ventium_run`. **Never clobber `obj_dir` or traverse/delete `obj_dir*` symlinks** when testing define variants — always pass a private directory (`OBJDIR=obj_dir_<variant>`, `L1AXI_OBJDIR=obj_dir_l1axi_<variant>`, or an external `/home/yukidama/external/tmp/...` `-Mdir`).
+2. **Explicit Verilator & Serialized Build Lock:** All Verilator builds route through `tools/verilator_serial.sh` inside `tools/build_scope.sh`. On the maintainer host, set `VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator` explicitly (especially under `systemd-run`) and place scratch in `TMPDIR=/home/yukidama/external/tmp`. Python child processes launched inside the guard must inherit the lock descriptor (`pass_fds=(9,)`).
+3. **Bounded C++ Parallelism (`VL_J`):** `VL_J` defaults to `1` with `--output-groups 0 --output-split 20000 --output-split-cfuncs 20000` and `-Werror-UNOPTFLAT`. Higher `VL_J` (`1..4` in `ipc_parallel`, `1..32` with `3000`-line splitting in `ipc_parallel32`) is permitted only inside the corresponding `VENTIUM_BUILD_SCOPE_PROFILE`.
+4. **External C++ Harnesses:** Custom C++ harnesses compiled against a generated model must use per-model unique source basenames and verify local object/generated-header dependencies (`Vventium_top*.h`) so `VPATH` never reuses incompatible objects across define profiles.
 
 ```sh
-make            # verilates rtl/*.sv + rtl/**/*.sv against ventium_top, builds the TB
-./obj_dir/tb_ventium --out run.vtrace \
-    --image <flat.blob> --load 0x08048000 --entry 0x08048000
+# Canonical default core build (direct mem_* backend):
+make -C verif/tb
+
+# Isolated L1/AXI variant build (32-job bounded scope on maintainer host):
+TMPDIR=/home/yukidama/external/tmp \
+VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator \
+VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
+VENTIUM_BUILD_SCOPE_UNIT=ventium-ipc-parallel32 \
+  tools/build_scope.sh -- make -C verif/tb l1axi VL_J=32 \
+  L1AXI_OBJDIR=/home/yukidama/external/tmp/obj_dir_my_candidate \
+  VL_EXTRA_DEFINES="+define+VEN_UOPCACHE +define+VEN_IC_BRAM"
 ```
 
-`make` is the **default**: it builds `obj_dir/tb_ventium` from the real
-`rtl/` sources. If `rtl/` has no `.sv` files yet it prints a clear error and
-points you at `make selftest`.
+## Runtime CLI Reference (`tb_ventium`)
 
-### Self-test (proves this component in isolation)
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--out <file>` / `--no-trace` | *(required)* | Output `.vtrace` path, or `--no-trace` to suppress file formatting during long free-runs. |
+| `--image <blob>` | *(none)* | Flat user binary or 64 KiB `--system` BIOS image (`0x100000 - size` ending at `0xFFFFF`). |
+| `--load <hex>` / `--entry <hex>` | `0` / `0` | Load base and reset `EIP` for flat user-mode images. |
+| `--init-esp <hex>` | `0x40c34910` | Initial `ESP` for user-mode ELFs (workers pass the golden's `n=0` `ESP` to align stack addresses). |
+| `--x87` | off | Emit 80-bit `st0..st7` and `fctrl/fstat/ftag/fiseg/fioff/foseg/fooff/fop` (`x87:true`). |
+| `--cycle` | off | Enable `cycle_mode=1` (dual-issue U+V fast pipeline) and emit `mode:"cycle"` timing records (`cyc`, `pipe`, `paired`, `stall`). |
+| `--cycle-func` | off | Run with `cycle_mode=1` (dual-issue U+V fast pipeline active) while emitting full architectural state records (`mode:"func"`). Note: paired U+V callbacks report post-pair state; group-aware checkers compare at completed issue-group boundaries. |
+| `--system` | off | Cold reset at `F000:FFF0` in real mode; emit `sys:true` records including `cr0/cr2/cr3/cr4` and segment selectors. |
+| `--l1-axi` | off | **Required at runtime** to route core memory through `ventium_l1_axi` (`ven_l1d` + `ven_axi_master`, `bus_mode=2`) in `+VEN_L1_AXI` builds. Compiling `+define+VEN_L1_AXI` alone leaves `l1axi_en=0`! |
+| `--bus-mode` | off | Route core memory through the pin-level 64-bit P5 `biu_p5` bus (`bus_mode=1`, used by `make bus-sva`). |
+| `--cosim` / `--soc-en` | off | Service port `IN`/`OUT` (`0x3F8`/`0xE9` console, `0xF4` `isa-debug-exit`) and ungate SoC `CPUID`/`RDTSC`/`INVD`/`WBINVD`. |
+| `--quiesce K` | `64` (`200000` with `--l1-axi`) | Stop after `K` consecutive clocks with zero retirements (explicit `--quiesce` overrides defaults). |
+| `--max-insn N` / `--max-cycles M` | `1<<20` / `1<<24` | Hard instruction and clock caps. |
+| `--errata <hexmask>` | `0` | Enable documented P5 silicon errata bits (`errata_en[4:0]`) for `make m6` (default `0` = clean core). |
+| `--smm-dump <json>` / `--smbase <hex>` | off / `0x30000` | Dump SMRAM save-state map + handler sentinels after `--system` SMM runs (`psmm`). |
+| `--dbg-step N` / `--dbg-bp <eip>` | `0` / `0` | `VEN_DBG_CORE` diagnostic controls only. **Never use in repair/performance acceptance runs** (inhibits U/V pairing). |
+| `--trace-vcd <file>` | off | Emit VCD waveform (requires `TRACE=1` build). |
 
-```sh
-make selftest    # builds against selftest/ventium_top.sv into obj_dir_selftest/,
-                 # runs it, prints the trace, and parses it with tracefmt.read_trace
-```
+## Host Simulation & Observer Rules
 
-The self-test exists because `rtl/` is authored by a sibling agent in parallel;
-it does **not** depend on the real core. It builds a stub that retires 8 NOPs
-over the `mem_*` handshake, then verifies a well-formed func `.vtrace` is
-produced and that `n` is strictly increasing with valid hex fields.
-
-### VCD waveforms (optional)
-
-```sh
-make TRACE=1            # (or: make selftest TRACE=1)  builds with --trace
-./obj_dir/tb_ventium --out run.vtrace --trace-vcd run.vcd ...
-```
-
-### Clean
-
-```sh
-make clean      # removes obj_dir, obj_dir_selftest, selftest.vtrace
-```
-
-## CLI reference (`tb_main.cpp`)
-
-| flag | default | meaning |
-|---|---|---|
-| `--out <file>` | *(required)* | output `.vtrace` |
-| `--image <blob>` | *(none)* | raw bytes loaded into memory |
-| `--load <hexaddr>` | `0` | byte address to load the blob at |
-| `--entry <hexaddr>` | `0` | entry / reset EIP (informational at M0; recorded in the trace `note`) |
-| `--max-insn N` | `1<<20` | stop after N retired instructions |
-| `--max-cycles M` | `1<<24` | stop after M core clocks |
-| `--quiesce K` | `64` | stop after K consecutive clocks with no retire |
-| `--trace-vcd f` | *(off)* | write a VCD (requires `TRACE=1` build) |
-
-Exit status is `0` on a clean run (quiescence / `--max-*` / `$finish`).
-
-## How the bus loop works
-
-The `mem_*` protocol at M0 is single-beat and combinational-ack-OK
-(`docs/rtl-interface.md §3`). Each clock the testbench:
-
-1. drives `clk` low, services the bus from the core's current outputs, `eval()`s;
-2. drives `clk` high (the rising edge where `vtm_retire` fires inside `eval()`),
-   services the bus again (in case the edge changed the request), `eval()`s.
-
-`MemModel::service()` returns `(mem_rdata, mem_ack)`: reads return the
-little-endian 32-bit word at `mem_addr`; writes honour `mem_wstrb` per byte;
-`mem_ack` is asserted for any valid request. Memory is sparse (4 KiB pages in a
-hash map) so a small image at a high address costs almost nothing; unmapped
-reads return `0`.
-
-## Notes for the integration phase
-
-- **Default target builds against `rtl/`.** No edits needed once the real core
-  is in place. `RTL_SRCS = $(wildcard $(RTL_DIR)/*.sv $(RTL_DIR)/**/*.sv)`. If
-  the core grows nested subdirectories deeper than one level, extend that
-  wildcard (or switch to a `find`-based list / a `.f` filelist).
-- **Verified end-to-end against the real verilated core** (15 RTL files,
-  `ventium_top` + submodules): it boots reset, retires the M0 canned sequence,
-  and the testbench writes a well-formed func `.vtrace`. It is also verified
-  against the throwaway stub via `make selftest`.
-- The executable lands at **`verif/tb/obj_dir/tb_ventium`** (real) and
-  **`verif/tb/obj_dir_selftest/tb_ventium`** (self-test).
-- **Image source.** `--image` takes a raw flat blob (the loadable bytes of the
-  test ELF). `verif/tests/` is expected to provide the ELF→blob helper plus
-  `manifest.json` (`image`, `load_addr`, `entry`) per `docs/rtl-interface.md §4`;
-  the testbench just consumes the blob + addresses.
-- **M0 expectation.** Per `docs/trace-format.md §4`, the M0 stub's func trace
-  will *not* match QEMU — the M0 gate is that every producer emits a well-formed
-  `.vtrace` and the comparator runs end-to-end. Real functional agreement starts
-  at M1.
-- **x87 (`x87:true`) is not emitted yet.** The header pins `x87:false`. When the
-  core adds the `vtm_retire_x87(...)` import (M3, `docs/rtl-interface.md §2`),
-  add its DPI body in `dpi_retire.cpp`, extend the record with the §2.2 x87
-  fields, and flip the header flag.
-- `trace_writer.h` is a small shared header introduced to coordinate the two
-  owned `.cpp` files (file-open + retire counter). It is header-only and
-  dependency-free.
+- **Acceptance Mode:** Repair and performance qualification requires **`U/V + system fast-pipe`** (`--cycle` or `--cycle-func` with `cycle_mode=1`, plus `--l1-axi` on L1/AXI builds and verified non-zero backing traffic), never U-only or direct-memory diagnostic controls.
+- **Unchanged-Input Settle Elision (`VL_INPUT_SNAPSHOT=1` / `--skip-unchanged-settle`):** Host-only direct-user optimization (`tools/prepare_inactive_l1_settle.py` / `model_input_snapshot.mk`) that omits redundant same-clock combinational settles only when every generated DUT input is unchanged. Both clock edges remain mandatory and **zero guest clocks are altered** (cannot be credited as an IPC or CM/MHz gain). Rejected when active AXI, system devices, debug ports, VCD tracing, or save/restore are enabled.
+- **Memory-Geometry Observer (`VEN_MEM_GEOMETRY`):** Passive pre-edge hook (`memory_geometry_probe.h`, `check_memory_geometry.py`, `memory_geometry_proof.py`) remains inert unless `VEN_MEM_GEOM_LOG` is set. Enabling `VEN_MEM_GEOMETRY` at compile time requires a fresh same-elaboration `memory_geometry_model_map.h` generated via `memory_geometry_proof.py` (`begin` → Verilator `--dump-tree-json` → `seal` → `bind` → `verify`); never retrofit current `core.sv` state enum numbers onto an older compiled binary.

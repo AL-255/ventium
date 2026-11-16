@@ -1,97 +1,26 @@
-# Shorten the late segment-extent arithmetic path
+# Segment-Extent & Fast-Memory Admission Timing Harnesses (`verif/segment_extent/`)
 
-October 13, 2026. **Isolated prototype, not promoted, synthesized or deployed.**
-The latest preceding synthesis estimates **35.056967572 MHz**, below the
-required 40 MHz. There is **no measured frequency gain** for this rewrite yet.
+`verif/segment_extent/` holds SMT/SystemVerilog equivalence miters and whole-core regression runners for three combinational critical-path cuts on `rtl/core/core.sv`'s segment-limit and fast-memory admission cones.
 
-## Measured path and change
+> **RTL Invariant (`AGENTS.md`):** Always preserve the canonical translatable address generator and keep segment identity in its separate combinational block — never reintroduce the `cur_seg_rel → acc_usr → perm_fault → bus` combinational loop (`-Werror-UNOPTFLAT`).
 
-Retained report:
-`/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI/endpoint-map-clock-r1/core_setup_unplaced_estimate.rpt`.
-The 97-level unplaced setup path goes from `q_pc[0]` to `gpr[4][16]` through
-fetch-size decode, segment extent checking, fragment/request qualification,
-L1 pair readiness, AXI acknowledgement and retirement. Relevant arrivals:
+## Harnesses in This Directory
 
-| Point | Arrival (ns) |
-| --- | ---: |
-| Late fetch demand size | 17.713 |
-| Extent arithmetic/compare carry chains | 19.013–20.499 |
-| `seg_access_fault` | 21.403 |
-| `fx_start` | 22.587 |
-| L1 `code_access` | 23.567 |
-| L1 store-pair intent ready | 24.127 |
-
-`prepare.py` replaces exactly two uses of
-`({1'b0,offset} + zero_extend(count) - 33'd1) > zero_extend(limit)`
-in `core.sv`. Address/limit relationships are computed separately; the late
-eight-bit count sees a nine-bit distance comparison. Adjacent 256-byte blocks,
-32-bit overflow and the old zero-count underflow behavior are preserved.
-All access/privilege/segment qualifiers remain unchanged. No added register,
-FSM state, instruction latency, feature flag, fault bypass or pipe fallback.
-
-This is a hypothesis about synthesis structure, not a promised gain: the
-tool can refactor logic, and the address/limit paths or downstream high-fanout
-ready chain may still dominate. Merely replacing the request-qualified
-`code_access` with a payload hint would need a separate contract proof and was
-**not** done.
-
-## Closed verification
-
-| Check | Result | Scope |
+| Variant | Scripts & Leaf TB | Equivalence Scope |
 | --- | --- | --- |
-| Recipe test | 1 test method passes | Exact anchors, two replacements, drift/reapplication rejection |
-| QF_BV arithmetic identity | `unsat` for any disagreement | All two-state 32-bit offset/limit and 8-bit count inputs; mathematical model, not translated whole-core RTL |
-| Exact proposed SV leaf | 2,852,512 vectors pass | Six high-address patterns, all low bytes/counts, boundary limits and random vectors |
-| Negative variants | Both rejected | Removing zero-count handling or adjacent-block handling fails; symbolic counterexamples also exist |
-| Native full core | Build exit 0, 20.11 s | Private matching host/header; 195 sources, one RTL file changed; 152 UV-fast definitions retained |
-| Canonical `make verify` | Still **7 PASS / 101 FAIL**, make exit 2; 400.98 s | No masks, goldens, bands or backend changes; not accepted |
-| Canonical cycle comparison | 20/20 identical to LMSW parent | Entire cycle records |
-| Same-input architectural replay | 108 cases / 80,800 records identical; 77.40 s | Parent versus candidate and candidate versus its original trace, no stack normalization |
-| LMSW memory/fault/retry | 44 RTL self-checks; 28 QEMU differential passes | Same 16 null/limit/LOCK oracle disagreements; gate remains exit 1 |
+| **1. 9-bit Extent Distance Compare** | `prepare.py`, `tb_extent.sv`, `run_leaf.py`, `run_regression.py`, `test_prepare.py` | Replaces `({1'b0, offset} + zext(count) - 33'd1) > zext(limit)` with precomputed address/limit distance compared against the late 8-bit `count` (`QF_BV` `unsat` across full 32-bit `offset`/`limit` × 8-bit `count`, including 256-byte blocks, 32-bit wrap, and zero-count behavior; `2,852,512` SV vectors + 2 negative mutations). |
+| **2. Decoupled `cur_data_size` Cone** | `prepare_data_size.py`, `tb_data_size.sv`, `run_data_size_leaf.py`, `run_data_size_checks.py`, `test_data_size.py` | Taps `cur_data_size` before the `S_FETCH`-only demand-size override (`S_FETCH` is unconditionally code, never data) so late instruction-fetch length decode leaves the data-segment limit cone while preserving whole-object x87 environment overrides (`UNSAT` cofactor proof + `362,144` SV vectors + 3 negative mutations). |
+| **3. Parallel Fast-Load Segment Eligibility** | `prepare_fast_segment.py`, `tb_fast_segment.sv`, `run_fast_segment_leaf.py`, `run_fast_segment_system.py`, `test_fast_segment.py` | Reduces normal-data attributes and full-limit eligibility across all segment descriptors in parallel before selecting by segment ID, and reads `DS` directly on the `DS`-only bounded fast-load branch (`UNSAT` cofactor proof + `1,202,816` SV checks across 4 profiles + 30 cold `U/V + fast-pipe` system runs at AXI delays `0/7/31`). |
 
-The fault rerun's results, exception vectors and record counts are identical
-to the LMSW parent at AXI latencies 0/7/31. This is useful integration evidence
-for the extent predicate, not a comprehensive segment-limit corpus. The
-canonical gate remains red regardless of same-input equivalence. Standard
-suite, full-PC transfer, FPGA source freeze, synthesis and physical acceptance
-have **not** run on this derivative.
+## Timing Disposition & Current Hardware Sign-Off (`c0e3fe43`)
 
-## Evidence and lifecycle
+During October 2026 unplaced synthesis exploration, these source-level cuts shaved local logic levels (e.g., `100 → 98` levels, `34.496 → 35.475 MHz` unplaced estimate on Variant 3) while revealing that `u_icache` broadcast fanout (`pf_fill_addr`) and unretimed front-end/decode mux cones dominated routed delay. Combining RTL fanout replication (`pf_fill_addr_rep[0..3]`), narrow `ic_res_line_base` muxing, global synthesis retiming, and `opt_design -muxf_remap` + `AlternateCLBRouting` achieved full **40 MHz post-route static timing sign-off** on **`main` release image `c0e3fe43`** (**`40.264133 MHz`**, `WNS = +0.164 ns`, `WHS = +0.010 ns`, `0` `>=85%` congestion hotspots), with verified physical Quake gameplay IPC of **`0.515778001` total U+V** (`0.397847833` primary/U-only) across cycles `28,696,827,616–32,989,404,795`.
 
-All paths below are relative to
-`/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
+## Running Recipe & Leaf Checks
 
-- `segment-extent-leaf-r1`: closure SHA-256
-  `2f1dda6a24336b19fe66147b3d57505c068fd306a70b03fea8c5685ae27e99a1`;
-  unit `ventium-segment-extent-leaf-oct13-r1.service`, invocation
-  `1fc5082ab9d3422db829ce8404b43d4a`, exit 0.
-- `segment-extent-core-r1`: model
-  `d039f5db76c653b249826d446dd5eab8ef9ac4d73243af6818a22cb26e4383c5`;
-  build closure `179dfe5322ee874ff5f1a80a654b19d7fe73410d277828caafee096fe7046a41`;
-  build invocation `1de03d3c0da9462cb96300ff5774fc1c`, exit 0;
-  canonical invocation `c2ecd51a644641698e69b7539ffcde0e`, owner exit 1.
-- `segment-extent-replay-r2`: owner
-  `ventium-segment-extent-replay-oct13-r2.service`, invocation
-  `c04f984c0ec94b4d86d222a197a433ab`, exit 0. The first replay adapter failed
-  before launching native cases due to passing a string to a Path-only hash
-  helper; r2 fixes that adapter error, not RTL or comparison policy.
-- `segment-extent-lmswfault-r1`: owner
-  `ventium-segment-extent-lmswfault-oct13-r1.service`, invocation
-  `242c53785746445699ae0c86a347520c`, exit 1, retaining the reference disagreements.
+```sh
+TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
+  python3 -B -m unittest discover -s verif/segment_extent -p 'test_*.py'
+```
 
-All owners are terminal with MainPID 0. Compile used the exclusive 32-job
-scope, 10 GiB RAM / 2 GiB swap. No Vivado run was launched for this rewrite.
-
-To retain disk reserve, four generated precompiled headers from the **closed**
-LMSW core/full-PC builds were compressed, byte-compared against the originals,
-then only their expanded `.gch` copies were removed. Sources, headers, objects,
-binaries, input pins and evidence were kept. Recovery archive:
-`lmsw-closed-pch-oct13.tar.gz` (51 MiB), SHA-256
-`71d1d1e3344efb288b0d75fd28e3df0266fc948ca3cfe7d6a780ee7341e2226a`.
-It contains the fast/slow `.gch` pair under `lmsw-core-r1/obj` and
-`lmsw-soc-r1/obj1-speed-q16-parentpolicy`; extract into the evidence parent to
-restore them. About 300 MiB net was freed, recoverably.
-
-Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
-**0.51030715 total U+V**, build `2b4d7a48`, cycles
-**1,200,065,237–1,300,065,237**. Predates this candidate; not FPGA/Doom IPC.
+Run any native Verilator leaf or core build inside `tools/build_scope.sh` with `VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator` and fresh output directories under `/home/yukidama/external/tmp`.

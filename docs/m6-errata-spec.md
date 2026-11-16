@@ -1,6 +1,8 @@
 # M6 — errata / stepping fidelity spec (layer-5 stretch)
 
-M6 (PLAN §7, REF.md layer 5) reproduces documented **P5 silicon errata** in the
+> **Current Status (Nov 2026 — COMPLETED, 5 Selectable Errata in `make m6`):** Five documented Pentium silicon errata—**Erratum 23** (`FDIV`), **Erratum 20** (`FIST` overflow), **Erratum 81** (`F00F` lock hang), **Erratum 59** (`MOV moffs` pairing suppression), and **Erratum 79** (V86 `POPF`/`IRET` `#DB` on `#GP`)—are implemented behind `errata_en` (all **default-OFF** in standard & FPGA `c0e3fe43` builds so architectural execution is bug-free, and self-checked when enabled via `make m6`).
+
+M6 reproduces documented **P5 silicon errata** in the
 RTL. This is explicitly a **partial, mostly-non-differential** milestone — see the
 oracle problem below — scoped to the errata that have **deterministic, self-
 checkable** behavior a user-mode functional+cycle model can reproduce.

@@ -1,114 +1,51 @@
-# Front-end (fetch/translate) pipeline — design spec (+VEN_FE_PIPE)
+# Front-End Fetch & Translation Pipeline Spec (`+VEN_FE_PIPE`)
 
-## Why
+> **Current Status (Nov 2026 — IMPLEMENTED & BOARD-QUALIFIED in `c0e3fe43`):** `VEN_FE_PIPE` (registered `fe_itlb_q` / `fe_dtlb_q` page filters), together with the **32-entry 4-way I-TLB** (`VEN_ITLB_ASSOC_4WAY`), **64-entry 4-way D-TLB** (`VEN_DTLB_ASSOC_4WAY`), dual-ported **256-entry 4-way BTB**, **4-entry RAS**, BRAM-backed **8 KiB 2-way L1 I-Cache** (`VEN_IC_BRAM` + `pf_fill_addr_rep[0..3]` fanout replication), and `VEN_UOPCACHE`, is deployed in RK-XCZU15EG-F release **`c0e3fe43`** (`40.264133 MHz` post-route STA sign-off, `WNS = +0.164 ns`, `0` `>=85%` congestion hotspots, `0.515778001` total U+V / `0.397847833` primary/U Quake gameplay IPC across cycles `28,696,827,616–32,989,404,795`).
 
-The full-SoC KV260 build is **route-bound at ~41 MHz** on the **fetch front-end**, not
-the memory subsystem (confirmed by the router congestion map: the level-6 hotspot is
-`u_icache` 52–79 % + `u_uopcache`, at X≈13 Y≈112–127). The worst path is the
-**architectural `eip` self-loop**:
+---
 
-```
-eip ─▶ iTLB translate (hit_of: 16-entry vpn compare carry-chain, tlb.sv)
-    ─▶ icache present-check (ic_present / walk_lin / pf_miss)
-    ─▶ µop-cache slot read (store_slots / ic_age)
-    ─▶ next-eip decision (decode length  OR  TLB-miss page-walk diversion)
-    ─▶ eip
-```
+## 1. Motivation: Breaking the Combinational `EIP` → TLB → Fetch Loop
 
-≈ **55 logic levels, 7.8 ns logic / 16 ns route (67 %)**. The logic depth is the same
-as the 65 MHz OOC core — the in-context route is what's killing it — but the path is
-also *deep*, so once the die fill is relieved (the `dcache_timing` removal, in flight)
-the **next wall is this combinational fetch cone**. Breaking it is the structural fix.
+Without front-end translation pipelining, every `S_PIPE` cycle evaluates a deep combinational loop from `eip` through the set-associative TLB tag compare, I-cache hit check, instruction-window muxing, and next-`eip` selection:
 
-## What is already pipelined (don't re-do)
-
-- **`+VEN_IC_BRAM`** — the icache line read ports are REGISTERED (synchronous BRAM);
-  content-addressed line buffers make sequential crossings bubble-free, and port-2b
-  prefetches the BTB-predicted-taken target.
-- **`+VEN_BTB_PIPE`** — the BTB *update* is registered (off the worst path).
-- **`mispred_bubbles`** — the existing branch-mispredict flush-bubble counter (the
-  current model of the P5 mispredict penalty).
-- A **32-byte prefetch buffer** decouples byte-fetch from the 2-wide decode.
-
-So the LINE READ is registered; the remaining ~55-level cone is the **translate +
-present-check + next-eip decision** that runs combinationally in the S_PIPE issue clock.
-
-## The cut — page-keyed registered micro-TLB (precise)
-
-The deep cone is `cur_lin → {itlb,dtlb} hit_of (16-entry vpn carry-chain) → xlate_miss`
-(`core.sv:4319`), and `xlate_miss` gates `issue_arm`/`eip`-advance/every S_PIPE arm.
-Cut it by **registering the TLB lookup**, exploiting that translation is **per-4 KiB
-page**: sequential fetch (and same-page data) reuses one registered translate.
-
-Behind `+VEN_FE_PIPE`, add a **page-keyed translate register** per TLB:
-
-```
-fe_itlb_q {page[31:12], phys[31:12], hit}     // keyed on the FETCH page
-fe_dtlb_q {page[31:12], phys[31:12], hit, dirty}   // keyed on the DATA page
+```text
+eip ─▶ I-TLB / D-TLB associative tag compare (tlb_assoc.sv / tlb.sv)
+    ─▶ I-cache tag/line hit check + byte-window / uop-cache read
+    ─▶ Dual U+V decode length / branch target / page-walk diversion
+    ─▶ next eip
 ```
 
-* **registering clock:** when the current access's page (`cur_lin[31:12]`) differs from
-  the matching `fe_*_q.page`, the combinational `*_lk_*` are sampled into `fe_*_q` and
-  this clock is a **1-cycle bubble** (`fe_xlate_stall`) — the only added latency.
-* **steady state:** when the page matches, `xlate_miss`/`mem_xlate` read `fe_*_q`
-  (registered, fast) instead of the live `hit_of` — so the carry-chain compare leaves
-  the issue path. Separate fetch vs data registers so fetch↔load interleaving on
-  different pages does NOT thrash one shared register.
+Because virtual-to-physical translation only changes at **4 KiB page boundaries**, steady-state sequential fetches and same-page data accesses do not need to re-evaluate the full associative TLB CAM on every clock.
 
-`xlate_miss` rewrite (FE_PIPE): `cur_is_d ? (!fe_dtlb_q.hit || (cur_is_w &&
-!fe_dtlb_q.dirty)) : !fe_itlb_q.hit`, valid only when `fe_*_q.page==cur_lin[31:12]`
-(else `fe_xlate_stall` re-registers). `mem_xlate` uses `fe_*_q.phys`. The page-walk
-fill (`tlb_fill_*`) ALSO invalidates `fe_*_q` (force a re-register after a walk) so a
-freshly-walked page is seen.
+---
 
-Net effect: a **1-cycle bubble only on page crossings** (rare — most fetch is
-intra-page) + the registered translate. The hot intra-page fetch loses the `hit_of`
-carry-chain from its critical path. This is contained to the TLB lookup — no prefetch-PC
-decoupling needed for increment 1 (the icache line read is already registered by
-`+VEN_IC_BRAM`).
+## 2. Implemented Front-End Architecture
 
-> NOTE — SAFETY: a TLB-pipeline bug is *silent* (wrong physical page → data
-> corruption, not a crash), so this is verified arch-bit-exact against QEMU on the
-> paging-heavy gates (sys pseg/ppage/pfault, Quake) before it is trusted, and it is
-> gated OFF by default.
+### 2.1 Registered Page-Keyed Micro-TLBs (`VEN_FE_PIPE`)
 
-## The fork that decides everything — cycle model
+`core.sv` maintains dedicated registered single-page translation filters for instruction fetch and data access so interleaved code/data pages never thrash a shared latch:
 
-The change is **not cycle-neutral** (unlike FP_PIPE2 / the BCD ÷100): the +1
-mispredict/fill latency shifts the cycle count of branch-heavy code. Two paths:
+- `fe_itlb_q`: `{page[31:12], phys[31:12], hit, ...}` keyed on the fetch linear page.
+- `fe_dtlb_q`: `{page[31:12], phys[31:12], hit, dirty, ...}` keyed on the data linear page.
 
-**(A) Cycle-faithful — model the PF stage in the oracle.** The real P5 *has* a PF→D1
-fetch pipeline, so adding it is arguably *more* faithful. Update `p5trace.so` /
-p5model to charge the +1 mispredict-redirect cycle, re-tune the M4/M5 bands
-(`mb_brloop`/`mb_brrandom`/`mb_nearbr` move), and re-baseline. Cost: oracle work +
-a full cycle re-verify (make verify, all bands, Quake lockstep). Benefit: the
-FE_PIPE build stays cycle-accurate-by-contract.
+Behavior:
+- **Intra-page steady state (0-cycle overhead):** When `cur_lin[31:12]` matches `fe_*_q.page`, `xlate_miss` and physical address generation read `fe_*_q` directly from flip-flops, removing the 4-way `tlb_assoc.sv` compare cone from the `S_PIPE` critical path.
+- **Page crossing (`fe_xlate_stall`):** When `cur_lin[31:12]` changes, the combinational `tlb_assoc` lookup is sampled into `fe_*_q` across a single 1-cycle stall bubble (or diverts to `S_WALK` on a backing TLB miss).
+- **Coherence & Flush Safety:** Any `CR3` reload, `INVLPG`, `CR0.PG`/`PE`/`WP` write, SMM transition, or `tlb_fill_*` completion invalidates `fe_itlb_q` and `fe_dtlb_q` immediately so stale translations can never survive.
 
-**(B) Fmax-only build.** `+VEN_FE_PIPE` is an Fmax/area demonstrator (like
-`+VEN_UOPCACHE` today): functionally bit-exact vs QEMU, but the cycle bands are
-**not** claimed for it (the default build stays the cycle-accurate reference). Cost:
-none to the verified core. Benefit: ships the Fmax now; cycle fidelity deferred.
+### 2.2 Backing Associative TLBs, I-Cache, BTB & Congestion Relief (`c0e3fe43`)
 
-> **Recommendation: (B) first.** The KV260 deployment build is already
-> `+VEN_UOPCACHE` (a non-cycle-faithful demonstrator), so FE_PIPE rides the same
-> contract — get the Fmax on the board, defer the oracle work to (A) if/when an
-> on-silicon cycle-accurate mode is wanted. This keeps the default build untouched
-> and the risk contained.
+| Front-End Block | Implemented Configuration (`c0e3fe43`) |
+| --- | --- |
+| **I-TLB (`tlb_assoc.sv`)** | **32-entry, 4-way set-associative** (`VEN_ITLB_ASSOC_4WAY`, pseudo-LRU), eliminating direct-mapped code-page conflict misses (`+3.88%` gameplay IPC bundle). |
+| **D-TLB (`tlb_assoc.sv`)** | **64-entry, 4-way set-associative** (`VEN_DTLB_ASSOC_4WAY`, pseudo-LRU, 4 KiB + 4 MiB PSE). |
+| **L1 I-Cache (`icache.sv`)** | **8 KiB, 2-way, 32 B lines**, synchronous `8 × RAMB36` data (`VEN_IC_BRAM`), physical snoop tags (`ic_ptag`) for alias-safe SMC/DMA invalidation, replicated `pf_fill_addr_rep[0..3]` fill-address trees, and narrowed `ic_res_line_base` muxing. |
+| **Branch Predictor (`bpred_btb.sv`)** | **Dual-ported 256-entry, 4-way BTB** (`VEN_BTB_PIPE`) with 2-bit bimodal saturating counters (simultaneous fetch lookup + retire update) and **4-entry Return Address Stack (RAS)**. |
+| **Predecode / µop Cache** | `ven_predecode_len.sv` + `uopcache.sv` (`VEN_UOPCACHE`, `VEN_UOP_SFETCH`, `VEN_SFETCH_RESIDENT`), paired in Vivado with `opt_design -muxf_remap` to eliminate byte-window `MUXF7`/`MUXF8` routing hotspots (`0` `>=85%` windows on `c0e3fe43`). |
 
-## Verification (both paths)
+---
 
-1. **Default build byte/cycle-identical** — all FE_PIPE logic under `ifndef`/`ifdef`
-   `VEN_FE_PIPE`; `make verify` 77/77 unchanged.
-2. **Functional (FE_PIPE on)** — `make verify` / m3 arch-state bit-exact vs QEMU
-   (the +1 fetch latency changes *timing*, never results); Quake + sys lockstep
-   EQUIVALENT.
-3. **(A only)** the re-tuned M4/M5 cycle bands green against the updated oracle.
-4. **Fmax** — re-synth + the full-SoC impl; confirm the eip cone leaves the worst-path.
+## 3. Verification Gates
 
-## Increment plan
-
-1. Gate + the `pf_xlate_q` register + the PF-stage translate (compile-clean, inert).
-2. Decouple the prefetch PC; wire D1 to read `pf_xlate_q`; extend `mispred_bubbles`
-   +1 on redirect under FE_PIPE.
-3. Functional verify (step 1–2 above); iterate to bit-exact.
-4. Synth/impl to confirm the Fmax gain; then (A) if cycle-faithful is wanted.
+- **Default Unit Mode (`VEN_FE_PIPE` off):** Preserves baseline `make verify` cycle-band calibration against `p5trace.so`.
+- **Deployed UV-Fast + `VEN_FE_PIPE` Profile:** Verified architecturally bit-exact against pinned `qemu-system-i386` across `make verify`, `make verify-sys` (`pseg`, `pmode`, `ppage`, `pfault`, `xc04`), `make l1` (`run-ic-alias-gate.sh`, associative I/D-TLB gates), and the full physical FPGA standard suite (CoreMark, cold Windows 95 OSR2 GUI, and cold DOS Quake `demo1`).

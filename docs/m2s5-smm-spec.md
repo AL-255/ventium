@@ -1,5 +1,7 @@
 # M2S.5 — SMM / RSM (partial oracle)
 
+> **Current Status (Nov 2026 — COMPLETED):** `SMI#` entry, P5 SMRAM state-save map (`SMBASE + 0xFE00`), SMM execution context, `RSM` (`0F AA`) state restoration (`rtl/core/core_smm.svh`, `psmm` gate), and core/backing SMRAM cache-isolation hooks (`tb_l1axi_smram`; see [`unsupported-isa.md`](unsupported-isa.md) §B.5) are implemented.
+
 Fifth system-mode RTL stage. System Management Mode: `SMI#` → save CPU state to
 SMRAM → run the SMM handler in a special real-mode-like context → `RSM` restores
 and resumes. **Partial-oracle** stage: the SMRAM save-state map layout is

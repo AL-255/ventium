@@ -1,5 +1,7 @@
 # M2S.6 — debug registers / `#DB` (the last system-mode stage)
 
+> **Current Status (Nov 2026 — COMPLETED):** `DR0`–`DR7` register file, `MOV DRn` (`0F 21`/`0F 23` with `CR4.DE` `DR4`/`DR5` `#UD` and `DR7.GD` `#DB`), `EFLAGS.TF` single-step traps, `EFLAGS.RF` suppression, instruction/data hardware breakpoints, and Pentium Erratum 79 (`err_dbgp`) are implemented and gated in `verif/sys/tests/pdebug/` (`make verify-sys`) and `make m6`. Note: hardware performance/acceptance runs on FPGA (`c0e3fe43`, `0.515778001` total U+V gameplay IPC) must leave debug `STEP`/breakpoints disarmed so U+V pairing is never inhibited.
+
 Sixth and final system-mode RTL stage. Adds the **debug-register file (DR0–DR7)**,
 the `MOV` to/from `DRn` instructions, and the **`#DB` debug exception (vector 1)** —
 delivered through the M2S.3 IDT pipeline. Closing this stage makes the M6 debug

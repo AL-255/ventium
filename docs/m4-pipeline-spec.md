@@ -1,6 +1,8 @@
 # M4 — dual-issue U/V pipeline + branch prediction (first cycle milestone)
 
-M4 (PLAN §7) turns the functional integer core into a **real in-order 5-stage
+> **Current Status (Nov 2026 — COMPLETED & EXPANDED):** M4's 5-stage (`PF`/`D1`/`D2`/`EX`/`WB`) dual-issue U+V pipeline (`rtl/core/core_fastpath.svh`, `decode.sv`, `issue_uv.sv`, `u_pipe.sv`, `v_pipe.sv`, `ven_p54_dual_agu.sv`) and dual-ported 256-entry 4-way BTB + 4-entry RAS (`bpred_btb.sv`) are implemented, gated in `make m4` / `make verify`, and extended to protected/paged mode (`VEN_SYS_FASTPATH*`, fast `MOVZX`/`MOVSX`, streamed `REP STOS`). Board-qualified RK-XCZU15EG-F image **`c0e3fe43`** (`40.264133 MHz` STA sign-off) achieves **`0.515778001` total U+V IPC** (`0.397847833` primary/U-only, `506,223,958` paired V retirements) across interior DOS Quake gameplay cycles `28,696,827,616–32,989,404,795`. See [`fastpath-coverage-spec.md`](fastpath-coverage-spec.md) and [`ap500-pairing-table.md`](ap500-pairing-table.md).
+
+M4 turns the functional integer core into a **real in-order 5-stage
 dual-issue (U/V) pipeline** with pairing, bypass/interlock, AGI, a BTB + 2-bit
 branch predictor — so that the core's **emergent cycle behavior** matches the
 `p5model` cycle oracle on the canonical microbenchmarks. This is the first

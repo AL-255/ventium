@@ -1,6 +1,8 @@
 # M2 — user-mode integer ISA completeness spec
 
-M2 (PLAN §7, re-scoped) extends the M1 single-issue integer core to the
+> **Current Status (Nov 2026 — COMPLETED):** M2 is implemented and gated in `make m2` / `make verify`, and has since been extended with full protected/V86/paged system mode (`M2S`), `#DE` + iterative `ven_idiv`, BCD/ASCII adjust ops, `CMPXCHG8B`, `XADD`, and `S_PIPE` fast-path execution (board-qualified in RK-XCZU15EG-F image **`c0e3fe43`**, `0.515778001` total U+V Quake gameplay IPC). See [`isa-coverage.md`](isa-coverage.md) for the complete current opcode matrix.
+
+M2 extends the M1 single-issue integer core to the
 **complete user-visible integer ISA** that QEMU's user-mode (linux-user gdbstub)
 oracle can validate, keeping every test program **diff-clean vs QEMU**
 (`verif/diff/compare.py --mode func` exit 0). This document is the milestone

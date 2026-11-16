@@ -1,77 +1,71 @@
-# P54 timing feasibility tools
+# P54 AP-500 Pairing & Issue-Byte Analysis Tools (`tools/p54_timing/`)
 
-`pair_bound.py` implements **experiment A only** in
-[`docs/P54_SUB1_CPI_MASTER_PLAN_2026-09-27.md`](../../docs/P54_SUB1_CPI_MASTER_PLAN_2026-09-27.md).
-It accepts one JSON object per *completed x86 instruction instance*, with all
-required `Insn` fields in `pair_bound.py` present (`data_bank` is optional). The tool rejects missing required fields and
-reports the maximum non-overlapping adjacent pairs on that fixed path. Its
-rules are independently transcribed from Intel AP-500 (241799-001), §§5.5–5.6.
-The `instance` identifier distinguishes a REP instruction from its elements;
-`boundary_after` prevents pairing across an event or changed control flow.
+This directory provides offline instruction-stream pairing bounds and verified
+issue-byte provenance checkers for P5/P54C dual-issue studies (`U/V + fast-pipe`).
 
-Run the directed rule tests with `python3 -m unittest discover -s tools/p54_timing`.
-No gameplay trace currently supplies all required annotations (in particular
-complete data addresses and decoded per-instruction dependencies). Do not
-fabricate them from retire PCs or label this optimistic bound a measured CPI.
-The memory bank-conflict count is diagnostic: a conflicting pair is still legal
-but V waits. Cache residence, latency, AGI, prefix decode clocks, FP timing,
-branch recovery, and exact completed-instruction accounting remain required
-for experiments B–D and final qualification.
+> **Qualification Context (`c0e3fe43`, 2026-11-14):** Offline AP-500 matching
+> bounds (`is_full_gameplay_bound: false`, `is_cycle_forecast: false`) are
+> static pairing-opportunity upper bounds, never cycle projections or gameplay
+> IPC measurements. Current verified physical DOS Quake gameplay IPC on
+> **RK-XCZU15EG-F** release image **`c0e3fe43`** (`161` defines, `40.264133 MHz`
+> STA-signed-off, `cycle_mode = 1'b1`) is **`0.515778001` total U+V**
+> (`0.397847833` primary/U-only, counters include `REP`-element retirement)
+> across cycles **`28,696,827,616–32,989,404,795`**.
 
-`tools/state_delta_analyze.cpp` can also emit `<prefix>.fast_issue_bytes.tsv`
-when passed the exact-build `fpd_layout.tsv`. Each row is an S_PIPE U/V
-retire with a verified physical I-cache tag, selected way and BRAM return
-buffer. `owner` distinguishes a fresh descriptor from a registered memory
-owner; the latter is admitted only while its saved PC still equals the live PC.
-Page-crossing byte spans are excluded; `mode16` records the code-size mode for
-independent decoding. `legacy_ordinal` is the absolute callback ordinal; gaps
-are expected because slow instructions, unbuffered code and other unproven
-owners are excluded. `validate_fast_bytes.py <prefix>` checks those ordinals against
-the analyzer's binary retire observations and independently decodes every
-exported byte span with Capstone. The last registered edge may be outside the
-host-callback window; it is checked against `final_registered_retire`. This
-export is a provenance tool, **not** yet a complete gameplay timing-model
-input. Never close ordinal gaps or treat the covered subset as representative
-without measuring coverage and the omitted classes.
+---
 
-`analyze_fast.py <prefix>.fast_issue_bytes.tsv --legacy-retire-events N`
-independently decodes those verified spans with Capstone, maps their explicit
-and implicit GPR/flag uses to the AP-500 pair classes, and runs the adjacent
-matching bound only within contiguous verified ordinals. Control transfers,
-PC discontinuities and ordinal gaps terminate a chain. Unrecognized forms are
-nonpairable in this diagnostic. Full *data* physical addresses are not yet
-available, but the output
-can now use `data_bank` for *explicit integer memory operands*: the exporter
-reconstructs the captured linear EA, whose bits 4:2 equal the P54 physical
-D-cache bank select under 4 KiB paging. Stack/FP and 16-bit addressing remain
-unknown. A bank value is not a proof of full physical address, cache hit,
-access width, or service latency. The output
-also breaks the selected matching into reg/reg, reg/mem, mem/reg and mem/mem
-classes. Ties select one matching, so the class mix is a diagnostic, not a
-unique property of the instruction stream. Unobserved events whose handler
-returns before the next retire may remain invisible at a sequential PC edge.
-Its JSON labels explicitly say `is_full_gameplay_bound: false` and
-`is_cycle_forecast: false`. It cannot establish CPI < 1 or replace the required
-complete instruction-instance trace and realistic timing scheduler.
+## Components
 
-One September 28 verified-byte sample exported 602,734 of 629,117 legacy
-events and selected 255,048 adjacent legal pairs; 93,218 selected pairs had
-two memory operands. This is an optimistic opportunity count, not an EX-stage
-throughput estimate. The directed `adc_add_dual_read_{distinct,same_bank}`
-cases both take three clocks per five-instruction iteration on the current
-candidate, despite a positive decoder/issue-unit pairing-class check and
-QEMU-equivalent state. Two read/ALU EX occupancies already fit those clocks;
-counting the pair as one saved clock would be a false CPI projection. The
-store/load no-spacer cases similarly take three clocks when non-aliasing and
-four when aliasing. Artifacts are under `/home/yukidama/p54-{adc-add-dual-read,store-load-nospacer}-sep28/`.
+1. **`pair_bound.py` (AP-500 Adjacent Pairing Bound):**
+   - Consumes one JSON object per completed x86 instruction instance (`Insn`
+     fields; optional `data_bank`) and computes the maximum non-overlapping
+     adjacent U+V pairs using rules transcribed from Intel AP-500 (241799-001,
+     §§5.5–5.6).
+   - `instance` distinguishes a `REP` instruction from individual element
+     iterations; `boundary_after` prevents pairing across control transfers or
+     architectural events; `data_bank` counts diagnostic P54 L1D bank conflicts
+     (bits `4:2`), where pairing remains legal while V stalls for bank service.
+   - Rejects missing required fields; never fabricate missing operands or memory
+     addresses from retire PCs alone.
 
-The analyzer additionally writes `<prefix>.slow_candidate_bytes.tsv` from
-slow-path `q_pc/q_len/ibuf` owners. These are **candidates**: some FPU and
-microsequence states retain a stale `q_len` or buffer. Run
-`merge_verified.py <prefix>` to reject any candidate lacking a matching
-retire-observation PC or an exact one-instruction Capstone decode. It writes
-`<prefix>.verified_issue_bytes.tsv` in ordinal order and reports every reject
-reason. This improves coverage but still does not establish that every byte
-owner is semantically identical to a separate architectural trace. REP
-callbacks remain unnormalized, asynchronous FP completion is unaccounted, and
-unobserved interrupts or code mutation still require independent checks.
+2. **`validate_fast_bytes.py` (`S_PIPE` Verified Byte Provenance):**
+   - Validates `<prefix>.fast_issue_bytes.tsv` emitted by
+     `tools/state_delta_analyze.cpp` (when supplied an exact-build
+     `fpd_layout.tsv`).
+   - Each exported row corresponds to an `S_PIPE` U/V retirement backed by a
+     verified physical I-cache tag, selected way, and BRAM return buffer (`owner`
+     distinguishes fresh descriptors from registered memory owners whose saved PC
+     matches the live PC; page-crossing spans are excluded).
+   - Cross-checks `legacy_ordinal` against binary retirement records
+     (`final_registered_retire` at the window edge) and independently decodes
+     every byte span with Capstone under the recorded `mode16` code-size bit.
+
+3. **`analyze_fast.py` (Contiguous-Span Pairing Classifier):**
+   - Decodes verified `<prefix>.fast_issue_bytes.tsv` rows (`--legacy-retire-events N`)
+     with Capstone, maps explicit/implicit GPR and flag uses onto AP-500 classes,
+     and runs `pair_bound.py` strictly inside contiguous verified ordinal runs
+     (ordinal gaps, PC discontinuities, and control transfers terminate a chain).
+   - Uses reconstructed 32-bit integer linear EA bits `4:2` (`data_bank`,
+     page-invariant under 4 KiB paging) to classify `reg/reg`, `reg/mem`,
+     `mem/reg`, and `mem/mem` opportunities without claiming cache hits, access
+     widths, or saved EX cycles.
+
+4. **`merge_verified.py` (Slow-Path Candidate Byte Filter):**
+   - Filters `<prefix>.slow_candidate_bytes.tsv` (`q_pc/q_len/ibuf` candidates,
+     where certain FPU/microsequencer states may hold stale `q_len`) by
+     requiring both a matching retire-observation PC and an exact
+     single-instruction Capstone decode, emitting `<prefix>.verified_issue_bytes.tsv`
+     in ordinal order with explicit rejection counts.
+
+---
+
+## Scratch Rules & Unit Tests
+
+Write all intermediate `.tsv`/`.json` analysis outputs under
+`/home/yukidama/external/tmp` with explicit `TMPDIR` (never in `$HOME` or repo
+root). Run the full unit test suite with:
+
+```sh
+TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
+  python3 -B -m unittest discover -s tools/p54_timing -v
+```

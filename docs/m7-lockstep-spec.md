@@ -1,5 +1,7 @@
 # M7 — macro-workload lock-step (Quake + Windows 95)
 
+> **Current Status (Nov 2026 — COMPLETED & EXTENDED to Full Physical Hardware):** Beyond bounded gdbstub input-replay prefixes and V86 mode (`M7.2`), Ventium now runs full standalone PC/AT simulation (`ao486-sim/`) and **board-qualified physical RK-XCZU15EG-F silicon** (image **`c0e3fe43`**, `161` defines, `40.264133 MHz` STA sign-off), completing **cold Windows 95 OSR2 GUI boot + multi-app PS/2 interaction + clean shutdown** and **cold FreeDOS/DOS Quake `timedemo demo1`** (`969` frames / `121.2 s` = **`8.0 FPS`**, **`0.515778001` total U+V / `0.397847833` primary/U gameplay IPC** across cycles `28,696,827,616–32,989,404,795`). Retain this spec as the contract for the QEMU input-replay co-simulation mode (`cosim_en`).
+
 Run real macro-workloads on the Ventium RTL in **lock-step against QEMU**: Quake
 (the TyrQuake P5 build) and a Windows 95 boot. This is a step-change in scale from
 the bare-metal sys tests (hundreds of records) to real programs (10⁸–10⁹+

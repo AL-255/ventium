@@ -1,6 +1,8 @@
 # Task-switch phase contract (A4-H09)
 
-**Status: OPEN / witness-modeled.** The fault vector and classifier fixes are
+> **Current Status (Nov 2026):** Active contract for `rtl/core/core_tsw.svh` / `core_tss_priv.svh` in both `experimental/uv-fast-ipc-apr` and board-qualified release **`c0e3fe43`** (`0.515778001` total U+V Quake gameplay IPC; cold Windows 95 OSR2 + DOS Quake `demo1` qualified). Clean 32-bit TSS task switches (`JMP`, `CALL`, `NT-IRET`) are differentially verified against `qemu-system-i386`; mid-switch fault-injection partial states remain witness-graded by `verif/sys/tests/ptswflt/` per the phase table below.
+
+**Phase-order status: OPEN / witness-modeled.** The fault vector and classifier fixes are
 closed (uniform across both oracles and pinned case-by-case); the partial-state
 phase behavior itself is an implementation choice, not ISA-exact closure. It is
 witness-graded against this document only, pending either a reorder to the

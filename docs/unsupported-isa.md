@@ -1,5 +1,7 @@
 # Ventium — architecturally UNSUPPORTED CPU behaviour
 
+> **Current Status (Nov 2026):** Mechanically checked against `rtl/` and `verif/` by `verif/sys/run-docs-status-gate.sh`. On physical hardware (**RK-XCZU15EG-F**, Vivado 2025.2, board-qualified image **`c0e3fe43`**, `161` defines, `40.264133 MHz` STA sign-off), Ventium passes both CoreMark seeds, cold Windows 95 OSR2 GUI + shutdown, and cold DOS Quake `demo1` (`8.0 FPS`, **`0.515778001` total U+V / `0.397847833` primary/U gameplay IPC** across cycles `28,696,827,616–32,989,404,795`). None of the remaining out-of-scope items below is encountered by those workloads; every item remains explicitly classified below.
+
 REVIEW2_aug2 H-19 requires that features left out of scope be *documented as unsupported
 CPU behaviour* rather than merely halting. This file is that documentation. It lists
 only things the hardware **cannot do**, not things that are merely untested.
@@ -90,15 +92,15 @@ and reported**: the request never reaches DDR (no aliasing of device space onto
 RAM), a sticky `route_err` raises `bus_err`, and the core halts. Two explicit
 platform overrides exist, and both are DDR-backed **by design**:
 
-- the VGA aperture (0xA0000–0xBFFFF), which the KV260 serves from the DDR
-  carveout (fb_vnc);
+- the VGA aperture (`0xA0000–0xBFFFF`), routed to VGA plane RAMs in the PC/AT
+  platform (`ven_ao486_shim`) or to the DDR carveout in standalone L1-AXI tests;
 - region 6 (≥ TOM) **inside the declared RAM window** — the same envelope
   `ven_axi_master` enforces at the address fold (`ADDR_MASK`, plus the
-  top-of-4G BIOS shadow ≥ 0xFFFE_0000). In the flat full-mask simulation that
-  is the whole 32-bit space; on the KV260 (256 MiB mask) it is the carveout
-  plus the BIOS shadow. Region 6 *outside* that envelope is a genuine
-  PCI/unmapped access and takes the loud `route_err` path like any other
-  non-DRAM region.
+  top-of-4G BIOS shadow ≥ `0xFFFE_0000`). In the flat full-mask simulation that
+  is the whole 32-bit space; in the 256 MiB carveout (`0x6000_0000` on
+  RK-XCZU15EG-F) it is the carveout plus the BIOS shadow. Region 6 *outside*
+  that envelope is a genuine PCI/unmapped access and takes the loud `route_err`
+  path like any other non-DRAM region.
 
 ---
 
@@ -142,7 +144,7 @@ gate's checks) have a stable home; a future pin belongs here.
 | `verify-soc` | no such target/gate script in this checkout (`verif/soc/` holds only build artifacts); excluded + logged by `run-verify-all.sh` |
 | m7 Quake lock-step / Win95 co-sim | producer artifacts gitignored; excluded + logged |
 | `VEN_SEG_ENFORCE` | per-access segment limit/type checks, off by default — with R2-H07 (2026-08-04) the enforcement is architecturally complete over the gated surface: explicit `seg_pm_loaded` metadata at every load site (no attr-change inference), the decoded-extent fetch check (`cs_extent_fault`), the S_INT_PROBE staged-descriptor sourcing, and the seglog probe covering the probe state. The default flip is **deferred on the review's own precondition**: "only after the complete system and m7 matrices pass" — the m7 Quake/Win95 artifacts are absent in this checkout, so the flip cannot be validated here. `make seg` (the enforcement build) is green: positive + 40-test negative sweep |
-| `VEN_X87_STKFLT` | **retired to a no-op (R2-H06, 2026-08-04):** the x87 stack-fault response is now UNCONDITIONAL — arm-independent detection (`det_*` descriptor covers the fast/cycle-mode arms), one `fp_commit_allowed` gating direct writeback / TOP updates / pipeline capture / deferred writes, masked responses (QNaN-indefinite results, unordered compare bits), unmasked #MF deferral. QEMU implements no stack faults, so the four corpus programs that deliberately wrap the stack (`tx_stack`, `tx_regform`, `tx_regform2`, `mb_fxch`) carry `x87_stkflt_arch` and compare with exactly the two oracle gaps masked (fstat IE|SF; the st* QNaN substitution), record-scoped to the measured fault ranges (A4-M02); the matrix itself is self-checked by `px87stk` |
+| `VEN_X87_STKFLT` | **retired to a no-op (R2-H06, 2026-08-04):** the x87 stack-fault response is now UNCONDITIONAL — arm-independent detection (`det_*` descriptor covers the fast/cycle-mode arms), one `fp_commit_allowed` gating direct writeback / TOP updates / pipeline capture / deferred writes, masked responses (QNaN-indefinite results, unordered compare bits), unmasked #MF deferral. QEMU implements no stack faults, so the three corpus programs that deliberately wrap the stack (`tx_stack`, `tx_regform`, `tx_regform2`) carry `x87_stkflt_arch` and compare with exactly the two oracle gaps masked (fstat IE|SF; the st* QNaN substitution), record-scoped to the measured fault ranges (A4-M02); the matrix itself is self-checked by `px87stk` |
 | `VEN_X87_MF_STRICT` | pending-`#MF` checks at every waiting op, off by default — QEMU checks at exactly two sites; default-on would diverge from the oracle |
 | `VEN_IC_ALIAS_SAFE` | conservative full I-cache flush per CPU store, off by default — the R2-H09 physical snoop tags made it unnecessary; kept as an experiment |
 

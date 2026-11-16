@@ -1,4 +1,6 @@
-# mairq — live-board interrupt-injection smoke (M-A)
+# mairq — bare-metal interrupt-injection smoke (historical KV260 bring-up)
+
+> **Historical Platform Note (Nov 2026):** `mairq` records a June 2026 bring-up probe for the early `ven_soc_app` PS→PL interrupt seam on **KV260**. Current hardware on **RK-XCZU15EG-F** (`c0e3fe43` on `main`) integrates the full PC/AT `8259A` PIC, `8254` PIT, coherent `ven_l1d` + `icache` snooping, and posted DDR4 drain barriers (`ven_ddram_axi_posted`), passing cold FreeDOS Quake and Windows 95 OSR2 GUI on silicon.
 
 The cheapest hardware gate on the road to interrupt-driven guests (SeaBIOS/FreeDOS)
 on the live KV260: it proves the deployed bitstream's PS→core interrupt-injection

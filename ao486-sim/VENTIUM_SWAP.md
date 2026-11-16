@@ -1,154 +1,147 @@
-# Ventium ↔ ao486-SoC core swap — integration design
+# Ventium ↔ MiSTer `ao486` SoC Core Swap (`ven_ao486_shim`)
 
-**Goal.** Replace the ao486 CPU core inside the *proven* ao486 MiSTer SoC with the
-Ventium (P5/P54C replica) core, co-simulated in Verilator the same way as the ao486
-sim (real C++ PS + real RTL peripherals, **no golden replay**), and drive it to
-**Quake timedemo completion** and **Win95 desktop**, with a clean PS/RTL split.
+This document specifies the CPU-to-platform integration seam shared by both the
+full-PC Verilator harness (`ao486-sim/ven/`) and the **RK-XCZU15EG-F** physical
+FPGA SoC (`fpga/rk/`).
 
-**Why this is plausible.** The ao486 sim proves the SoC-minus-core is good (it boots
-Win95). The Ventium core is independently proven (98/98 functional diff-clean vs
-QEMU; system-mode seg/paging/IDT/TSS/SMM done; x87 + transcendentals; it self-drove
-SeaBIOS POST + FreeDOS to `C:\>` in its *own* SoC). What Ventium has never had is a
-real ISA-peripheral environment — which is exactly what this SoC provides.
+> **Physical Qualification Status (`c0e3fe43`, 2026-11-14):** Using this exact
+> `ven_ao486_shim` + `ven_axi2avalon` seam (`rtl_ven_core.f` + `rtl_ven_soc.f`),
+> board-qualified `main` release image **`c0e3fe43`** (`161` defines,
+> `40.264133 MHz` STA-signed-off on `xczu15eg-ffvb1156-2-i`, `cycle_mode = 1'b1`)
+> passes all three physical standard-suite gates: both CoreMark seeds
+> (`2.100128 / 2.106796 CM/MHz`), cold Windows 95 OSR2 GUI multi-application
+> desktop + PS/2 mouse/keyboard + clean shutdown, and cold DOS Quake `demo1`
+> (`8.0 FPS` at `40.000 MHz`). Verified physical interior Quake gameplay IPC is
+> **`0.515778001` total U+V** (`0.397847833` primary/U-only, counters include
+> `REP`-element retirement) across cycles **`28,696,827,616–32,989,404,795`**.
+> Ongoing RTL work on `experimental/uv-fast-ipc-apr` requires fresh QEMU
+> differentials and full-suite re-qualification.
 
 ---
 
-## 1. Strategy — keep the SoC + PS, swap only the core box
+## 1. Architecture — Drop-In Core Swap at `system.v`
 
-The ao486 core is instantiated at `system.v:296` (`3rd-party/ao486_MiSTer`). Its port
-list (`ao486.v:29-76`) is the **entire** CPU seam. We introduce a drop-in module
-**`ven_ao486_shim`** that presents that *exact* port list and internally wraps
-`ventium_top` + protocol adapters. `system.v` is patched at one instantiation site
-(`ao486 ao486(...)` → `ven_ao486_shim u_cpu(...)`); *all* peripheral wiring (iobus,
-pic, dma, l2, mgmt, vga, ide, pit, rtc, ps2) is untouched. The MiSTer HPS C software
-(the ao486-sim PS: BIOS/ROM load, CMOS, IDE/mgmt disk serving, framebuffer, PS2,
-clock/DDR service) is **peripheral-agnostic** and reused verbatim — the golden-replay
-harness is dropped.
+In `3rd-party/ao486_MiSTer/rtl/system.v`, `+define+VEN_CORE` replaces the single
+`ao486` CPU instance with **`ven_ao486_shim`** (`ao486-sim/ven/ven_ao486_shim.sv`),
+leaving all legacy PC/AT peripherals (`iobus`, dual `8259A` PIC, `8254` PIT,
+`8237` DMA, `MC146818` RTC, `8042` PS/2, dual IDE, floppy, planar/256-color VGA,
+and Sound Blaster 16 / OPL3) intact:
 
-```
-             ┌──────────────── ven_ao486_shim (presents ao486 port list) ─────────────────┐
-  system.v ──┤  ventium_top (VEN_L1_AXI + VEN_KV260_SOC + cosim_en)                        ├── system.v
-  peripherals│    ├ m_axi_*  ─► [AXI4→Avalon bridge]  ─► avm_*  (→ l2_cache → DDRAM → PS)   │  peripherals
-  (KEPT)     │    ├ io_*      ─► [io split adapter]    ─► io_read_*/io_write_* (→ iobus)     │  (KEPT)
-             │    ├ intr/inta ◄─►[interrupt adapter]   ◄─► interrupt_do/vector/done (→ pic)  │
-             │    └ (addr)    ─► [A20 gate]            ─► a20_enable applied                 │
-             │  dma_* slave port: tied off (no ISA DMA on the IDE-PIO boot path)            │
-             └────────────────────────────────────────────────────────────────────────────┘
+```text
+             ┌───────────────────── ven_ao486_shim.sv ──────────────────────┐
+  system.v ──┤  ventium_top (U+V fast-pipe, shared 80b x87, 8 KiB I$ + D$)  ├── system.v
+  PC/AT SoC  │    ├─ m_axi_* ──► [REMAP undo + A20] ──► ven_axi2avalon ──►  │  avm_* (VGA / ROM / DDR)
+             │    ├─ io_*    ──► [split I/O + done-race guard] ──────────►  │  io_read_* / io_write_*
+             │    ├─ intr / inta_vector / inta ◄─────────────────────────►  │  8259A PIC handshake
+             │    └─ dbg_bus[290:0] / dbg_cmp[127:0] ◄───────────────────►  │  PMU / trace / DDR drain
+             └──────────────────────────────────────────────────────────────┘
 ```
 
-## 2. The seam contract (what `ven_ao486_shim` must present — from the map)
+---
 
-| group | ao486 port | dir | notes |
-|---|---|---|---|
-| clk/rst | `clk`,`rst_n` | in | |
-| A20 | `a20_enable` | in | address bit-20 gate; **applied inside the core on ao486** — the shim must apply it (Ventium deferred A20) |
-| cache | `cache_disable` | in | only gated ao486's L1 icache; **ignore** for Ventium |
-| interrupt | `interrupt_do`/`interrupt_vector[7:0]` in, `interrupt_done` out | 8259 level + vector in, INTA pulse out |
-| memory | `avm_address[29:0]`(dword),`avm_writedata`,`avm_byteenable[3:0]`,`avm_burstcount[3:0]`,`avm_write`,`avm_read` out; `avm_waitrequest`,`avm_readdatavalid`,`avm_readdata` in | Avalon-MM burst, variable latency; covers DDR + VGA aperture (0xA0000-0xBFFFF) + BIOS shadow (0xC0000-0xFFFFF); routing stays in `l2_cache` |
-| dma | `dma_*` (8 wires) | slave | ISA DMA into CPU cache; **tie off idle** initially |
-| port I/O | `io_read_do`/`io_read_address[15:0]`/`io_read_length[2:0]`/`io_read_data[31:0]`/`io_read_done`; `io_write_*` | split req/done, byte-count 1/2/4 |
+## 2. Seam Port Contract (`ven_ao486_shim`)
 
-## 3. Ventium side (what the core presents — from the map)
+| Signal Group | `system.v` Port(s) | Dir | Seam Behavior |
+| --- | --- | --- | --- |
+| Clock / Reset | `clk`, `rst_n` | in | Synchronous core/SoC clock (`40.000 MHz` boot on FPGA) & active-low reset |
+| A20 Gate | `a20_enable` | in | Masks physical address bit 20 (`~32'h0010_0000`) when deasserted |
+| Legacy Cache Pin | `cache_disable` | in | Ignored at pin boundary; Ventium honors architectural `CR0.CD` via `VEN_L1_HONOR_CD` |
+| 8259A Interrupts | `interrupt_do`, `interrupt_vector[7:0]`, `interrupt_done` | in/out | Maps 1:1 to `ventium_top` `intr`, `inta_vector`, and single-cycle `inta` pulse |
+| Avalon-MM Memory | `avm_address[29:0]`, `avm_writedata[31:0]`, `avm_byteenable[3:0]`, `avm_burstcount[3:0]`, `avm_write`, `avm_read`, `avm_waitrequest`, `avm_readdatavalid`, `avm_readdata[31:0]` | master | Driven by `ven_axi2avalon`; routes legacy VGA (`0xA0000–0xBFFFF`), ROM shadow (`0xC0000–0xFFFFF`), and system DDR |
+| ISA Slave DMA | `dma_*` | slave | Tied idle (`dma_waitrequest = 0`); IDE uses PIO/mgmt sectors |
+| Split Port I/O | `io_read_do/address/length/data/done`, `io_write_do/address/length/data/done` | master | Adapts `ventium_top` unified `io_*` (`1`/`2`/`4`-byte exact `IN`/`OUT`) |
+| Debug & Drain | `dbg_bus[290:0]`, `dbg_cmp[127:0]` | out/in | Exposes `UV64` total U+V retirement counters (selectors `76..79`), scan/trace rings, and `VEN_DDR_POSTED` hardware drain status (`dbg_cmp[109:107]`) |
 
-- **Memory:** use the **AXI4 master** (`m_axi_*`, build `+VEN_L1_AXI`, `l1axi_en=1`) =
-  `ven_l1d` (8 KB/2-way/32 B L1, same-cycle hit ack) + `ven_axi_master` (read = one
-  8-beat INCR burst @4 B; write = single beat, WSTRB verbatim). The raw `mem_*` port
-  needs zero-latency and is unusable against real DDR. `ven_axi_master` applies
-  `ddr_addr = REMAP_BASE + (phys & ADDR_MASK)` — the shim must set **REMAP_BASE=0,
-  ADDR_MASK=0x0FFF_FFFF** (or wider) so the AXI address == guest physical, then the
-  bridge does `avm_address = phys[31:2]`.
-- **Port I/O:** `io_*` (`io_req/we/addr[15:0]/size[2:0]/wdata/rdata/ack`, `cosim_en=1`)
-  — decodes **all** x86 IN/OUT; single-beat, held until `io_ack`.
-- **Interrupts:** `intr`(level in)/`inta_vector[7:0]`(in)/`inta`(pulse out),
-  `soc_en=1`. Behavioral 8259/INTA (SMI>NMI>INTR, honors IF + STI/MOV-SS shadow).
-  Maps ~1:1 to the ao486 seam. `nmi` tied 0.
-- **Boot:** `boot_mode=1` → cold reset at CS:EIP=F000:FFF0 real mode → fetches BIOS
-  via memory. `init_eip/esp` unused in system mode.
-- **FPU:** in-core (`rtl/fpu`), SoftFloat-verified; `+VEN_TRANSCENDENTAL` for FPATAN
-  (Quake) etc. (Not the DPI cosim — the full core has its own x87.)
+---
 
-## 4. The three adapters (the net-new RTL in `ven_ao486_shim`)
+## 3. Synthesized Core & Cache Configuration (`rtl_ven_core.f` / `rtl_ven_soc.f`)
 
-1. **AXI4 → Avalon-MM bridge** (the big one). AXI read burst (ARLEN=7) → `avm_read`
-   with `avm_burstcount=8`; forward 8 `readdatavalid` beats → R channel (RLAST on
-   beat 8). AXI single write → `avm_write`,`avm_burstcount=1`,`avm_byteenable=WSTRB`;
-   `B` on accept. Hold AR/AW until `avm_waitrequest` low. One outstanding txn to start
-   (Ventium issues serially anyway); pipeline later for perf.
-2. **I/O split adapter.** `io_req & !io_we` → `io_read_do`, `io_read_length=io_size`,
-   `io_read_address=io_addr`; `io_read_done`→`io_ack`, `io_read_data`→`io_rdata`.
-   `io_req & io_we` → `io_write_do`/`io_write_data`/`io_write_length`; `io_write_done`
-   →`io_ack`. (Confirm `io_size`↔`io_length` encoding: both = byte count 1/2/4.)
-3. **Interrupt adapter.** `intr=interrupt_do`, `inta_vector=interrupt_vector`,
-   `interrupt_done=inta`. Verify the PIC holds `interrupt_vector` valid through the
-   `inta` strobe (it drives it combinationally off level; ao486 PIC does too).
-4. **A20 gate.** `phys_a20 = a20_enable ? phys : (phys & ~32'h0010_0000)` on the AXI
-   address into the bridge. (Not on I/O — 16-bit ports have no A20.)
+- **Dual-Issue Superscalar Pipeline:** Hardwired `cycle_mode = 1'b1` (`U/V +
+  system fast-pipe`: `VEN_FE_PIPE`, `VEN_SYS_FASTPATH`, `VEN_SYS_FASTPATH_RELOC`,
+  `VEN_SYS_FASTLOAD_FLAT`, `VEN_SYS_FASTLOAD_BOUNDED`, `VEN_SYS_FASTSTORE_FLAT`,
+  `VEN_REP_STOS_STREAM`), 32-entry 4-way I-TLB, 64-entry 4-way D-TLB, and
+  dual-ported 256-entry 4-way BTB + 4-entry RAS.
+- **Full P5 Split L1 Caches:** 8 KiB 2-way snoop-coherent L1 I-Cache (`8×RAMB36`
+  data + LUTRAM tags) and 8 KiB 2-way 8-bank dual-port-read L1 D-Cache
+  (`ven_l1d` + `ven_p54_hit_return`, write-back/write-allocate, honoring `CR0.CD`
+  and byte-exact UC MMIO) driving `ven_axi_master` (`VEN_L1_AXI`, `l1axi_en = 1`).
+  `VEN_CACHE_HALF` and `VEN_IC_NARROWB` are retired and forbidden.
+- **Shared Pipelined 80-Bit x87 FPU (`fp_shared/`):** Zero-cycle `FXCH` rename
+  queue, pipelined `ven_fp_alu`, 38-DSP shared multiplier & polynomial
+  transcendental engine (`VEN_TRANSCENDENTAL`, `VEN_FPREM`), and radix-4 SRT
+  divider/sqrt (`VEN_FP_SHARED`, `VEN_FP_PIPE2`).
+- **Cold Boot Vector:** `boot_mode = 1'b1`, `soc_en = 1'b1`, `cosim_en = 1'b1`,
+  starting cleanly in real mode at `CS:EIP = F000:FFF0`.
 
-## 5. Memory hierarchy & coherency
+---
 
-`Ventium pipeline → ven_l1d (WB L1) → ven_axi_master → [bridge] → avm_ → l2_cache (WB)
-→ DDRAM → C++ DDR`. Two coherency concerns carried from the map:
-- **R2 — interrupt/IVT & SMC vs write-back L1.** Ventium's interrupt delivery / some
-  system reads may bypass `ven_l1d` while guest writes sit dirty in it (a known RTL
-  gap that blocked interrupt-driven real-mode guests on KV260 silicon). In Verilator
-  the flat DDR *may* hide it, but real-mode boot is interrupt-driven from the first
-  `INT`. Mitigations, in order of preference: (a) make `ven_l1d` write-through in the
-  sim build; (b) route interrupt/descriptor/IVT reads through L1; (c) targeted flush.
-  Decide empirically at POST bring-up.
-- **DMA coherency (R1b).** Ventium has no DMA-snoop port. IDE boot is **PIO** (PS
-  serves sectors over `mgmt_*`; CPU reads via I/O ports), so no ISA DMA touches the
-  cache — tie off `dma_*`. Floppy/SB16 DMA (audio) is off the boot path; revisit only
-  if a workload needs it.
+## 4. Protocol Adapters Inside `ven_ao486_shim`
 
-## 6. PS/RTL responsibility split (the goal's "clean separation")
+### 4.1 AXI4-to-Avalon-MM Bridge (`ao486-sim/ven/ven_axi2avalon.sv`)
 
-- **PL (RTL, in `system.v`):** Ventium core + FPU + L1; `l2_cache`; and *all* ISA
-  peripherals with architecturally-visible timing — **8254 PIT, 8259 PIC, RTC, IDE
-  register interface, VGA (CRTC + planar mem), 8042/PS2, DMA controller**. Latency and
-  cadence are cycle-deterministic in RTL.
-- **PS (C++, `ao486-sim/ps` + `sim_main.cpp`):** file-backed / bulk / host-facing
-  state only — **disk images (served over `mgmt_*`), BIOS/VGA-BIOS ROM blobs, CMOS
-  contents, framebuffer scanout capture, keyboard/mouse injection, clock generation +
-  DDR-latency model**. The PS never sees an ISA port access.
+1. **Address Normalization & A20:** `ven_ao486_shim` removes `REMAP_BASE`
+   (`40'h0_4000_0000`) from `ventium_top`'s AXI4 physical address, applies
+   `a20_enable` to bit 20, and passes byte addresses into `ven_axi2avalon`,
+   which drives dword-indexed `avm_address[29:0] = addr[31:2]`.
+2. **Burst & Byte-Lane Fidelity:** Cache-line fills (`ARLEN = 7`, 32 B) map to
+   `avm_read` bursts (`avm_burstcount = 8`), returning 8 `avm_readdatavalid`
+   beats on AXI `R` (`RLAST` on the final beat); narrow UC reads and single-beat
+   writes preserve exact `ARSIZE` / `WSTRB` (`avm_byteenable[3:0]`) without
+   widening non-cacheable accesses. Directed testbench:
+   `ao486-sim/ven/tb_axi2avalon.sv`.
 
-This is a *stronger* form of the KV260 split (there, `inb/outb` traps to PS software;
-here every ISA port stays in RTL). It is exactly reusable from ao486-sim unchanged.
+### 4.2 Split Port-I/O & Posted-DDR Drain Barrier
 
-## 7. Milestone plan (incremental, each self-driven & co-sim'd)
+- Converts `ventium_top` `io_req`/`io_we` into `io_read_do` / `io_write_do` and
+  deasserts the request strobe immediately upon `io_read_done | io_write_done`
+  (`io_done_seen` guard) so multi-cycle core retirement cannot re-trigger a
+  second peripheral read/write side effect.
+- When `VEN_DDR_POSTED` is enabled on FPGA (`ven_ddram_axi_posted.sv`), posted
+  write acceptance is **not** external completion: `dbg_cmp[108:107]` gates I/O,
+  debug halt, and MMCM DRP clock switches until all 16 posted DDR4 write slots
+  drain to `S_AXI_HP0_FPD` with zero sticky fault (`dbg_cmp[109] == 0`).
 
-| # | milestone | proof |
-|---|---|---|
-| A | `ven_ao486_shim` + adapters + patched `system.v` **elaborate + lint** in Verilator | 0 errors |
-| B | Ventium **cold-resets at F000:FFF0**, fetches BIOS via `avm_`, retires real-mode insns | eip trace shows BIOS fetch/execute |
-| C | **BIOS POST completes** (mem sizing, CMOS, VGA init, IDE detect) self-driven | POST video sign-on; IDE detected |
-| D | **DOS boots from IDE** (INT 19h → boot sector → kernel), interrupt-driven | `C:\>` reachable |
-| E | **Quake timedemo to completion** | timedemo end / FPS line |
-| F | **Win95 to desktop** (reuse the vga.drv fix + dialog dismissals) | desktop PNG |
-| G | clean PS/RTL split documented + regression scripts | reproducible runs |
+---
 
-## 8. Build / co-sim
+## 5. Memory Hierarchy & Self-Modifying Code Coherency
 
-- New RTL: `ao486-sim/ven/ven_ao486_shim.sv` + `ven_axi2avalon.sv` (+ Ventium
-  `rtl/ventium.f` files, built with `+VEN_L1_AXI +VEN_KV260_SOC +VEN_TRANSCENDENTAL`).
-- `system.v` core-swap via `patches/ao486_MiSTer_vencore.patch` (guarded so the
-  existing ao486 build is untouched) or a `+define+VEN_CORE` in a new filelist
-  `rtl_ven.f`.
-- New sim binary `obj_dir_ven/` reusing the ao486-sim PS (`ps/`, `sim_main.cpp`) with
-  a `--ventium` build define; same run flags (`--ide`, `--rate`, `--video-fb`, `--kb`).
+- **Hardware FPGA Path (`c0e3fe43`):** `ventium_top` → `ven_l1d` + snooped
+  `u_icache` → `ven_axi_master` → `ven_ao486_shim` → `ven_axi2avalon` →
+  bypassed outer `ao486` `l2_cache` wrapper (retaining legacy VGA/ROM decode) →
+  `ven_ddram_axi_posted` (16-slot posted write queue + CAM read-after-write
+  hazard bypass) → `128b @ 100 MHz` `S_AXI_HP0_FPD` DDR4 (`0x6000_0000`).
+- **Self-Modifying / Relocated Code:** Store commits snoop L1 I-Cache tags and
+  prefetch buffers across real-mode relocation (e.g. `IO.SYS` `REP MOVSB` to
+  `0x8000:0000`) and protected-mode DPMI/VxD code loading.
 
-## 9. Top risks (from the maturity map) & first-failure watch
+---
 
-1. **AXI↔Avalon bridge correctness** (burst beats, byteenable, ordering) — verify with
-   a directed memory test before POST.
-2. **Self-driven closed-loop I/O** (PIT/PIC/RTC/IDE-status polling) never run without
-   golden replay — the most likely place a real boot diverges from the lockstep runs.
-3. **R2 write-back-L1 coherence** on interrupt/IVT/SMC — expected to bite at the first
-   real-mode `INT`.
-4. **A20 + real-mode wrap** (deferred in Ventium) — needed by BIOS/DOS.
-5. **Opcode/system-mode gaps** halt loudly (never silently corrupt) — each is a
-   bounded, debuggable stop, not corruption.
+## 6. Clean PL / PS Responsibility Split
 
-*Sources: the integration-surface map (workflow wwk9ksd91) against
-`3rd-party/ao486_MiSTer/rtl/{system.v,ao486/ao486.v,cache/l2_cache.v,soc/*}`,
-`rtl/ventium_top.sv`, `rtl/mem/ven_l1_axi.sv`+`ven_axi_master.sv`, `docs/rtl-interface.md`,
-`README.md`, `PROGRESS.md`, and the ao486-sim PS (`ps/`, `sim_main.cpp`).*
+- **Synthesized RTL (`system.v` + `ven_ao486_shim`):** Full P5/P54C CPU, x87
+  FPU, split L1 caches/TLBs, and all cycle-visible PC/AT ISA peripherals (`PIC`,
+  `PIT`, `RTC`, `8042` PS/2, `IDE` taskfile, `VGA`, `DMA`, `SB16`/`OPL3`).
+- **Host / ARM PS Layer:** Serves backing media (`mgmt_*` IDE/FDD sector streams,
+  BIOS/VGA ROM initialization, CMOS seed), passive framebuffer capture, hosted
+  PS/2 keyboard/mouse mailboxes, and DDR4 memory backing — never intercepting
+  x86 `IN`/`OUT` instructions in software.
+
+---
+
+## 7. Verilator Co-Sim Harness (`ao486-sim/ven/sim_ven.cpp`)
+
+`make -C ao486-sim ven` links the exact `rtl_ven_core.f` + `rtl_ven_soc.f` RTL
+lists with:
+
+- `ao486-sim/ven/sim_ven.cpp`: Cycle loop, configurable DDR latency/board-AXI
+  transport model (`board_axi_memory.h`), performance/pairing samplers,
+  deterministic `--snapshot-v3`/`--snapshot-v4` save/restore, and `.vtm`/delta
+  diagnostics.
+- `ao486-sim/ven/vtm_dpi.cpp`: Read-only `vtm_retire*` DPI retirement observers
+  (see [`../docs/rtl-interface.md`](../docs/rtl-interface.md)).
+- `ao486-sim/ps/{ps_shim.cpp,ide.cpp,support/x86/x86.cpp}`: Shared MiSTer PS
+  backing services with immediate `fflush` host-write visibility
+  ([`ven/DISK_WRITE_VISIBILITY.md`](ven/DISK_WRITE_VISIBILITY.md)).
+
+For build flags, private `VEN_OBJDIR` rules, cold-boot commands, and checkpoint
+replay verification, see [`REPRODUCE.md`](REPRODUCE.md).

@@ -2,12 +2,14 @@
 Bus & Peripheral Theory of Operation
 =========================================================
 
-This page explains *how the chipset actually works*: how the core reaches a
-peripheral, how a register access is sequenced, how interrupts are delivered,
-how DMA and memory-mapped devices behave, and how a device can be moved between
-the PL fabric and the PS A53 without changing any of it. The high-level map is in
-:doc:`/architecture`; the RTL-vs-software placement is in
-:doc:`/soc/peripheral-split`.
+This page documents how the Ventium P5/P54C processor communicates with system
+memory, programmed I/O (PMIO), interrupts, DMA, and Zynq UltraScale+ management
+services on the **RK-XCZU15EG-F** (``xczu15eg-ffvb1156-2-i``, Vivado **2025.2**,
+board-qualified image ``c0e3fe43``, ``40.264133 MHz`` post-route STA
+sign-off, ``0.515778001`` total U+V / ``0.397847833`` primary/U Quake gameplay
+IPC across cycles ``28,696,827,616–32,989,404,795``). See :doc:`/architecture`
+for the top-level block map and :doc:`/soc/peripheral-split` for the division
+of work between PL RTL and the Cortex-A53 PS.
 
 .. graphviz:: /diagrams/ventium-soc.dot
 
@@ -15,184 +17,115 @@ the PL fabric and the PS A53 without changing any of it. The high-level map is i
    :local:
    :depth: 1
 
-Two buses out of the core
-=========================
+Two CPU bus seams: AXI4 memory & PMIO port I/O
+==============================================
 
-Everything a program does that leaves the register file travels on one of **two
-independent buses** the core (``core.sv``, ``soc_en=1``) exposes:
+Every off-core transaction leaving ``ventium_top`` / ``ventium_l1_axi`` travels
+on one of two independent interfaces:
 
-* **The memory bus** (``mem_*``) — every load/store and instruction fetch. A
-  single-beat request/ack protocol: ``mem_req`` + ``mem_we`` + ``mem_addr`` +
-  ``mem_wdata`` + ``mem_wstrb`` go out, ``mem_rdata`` + ``mem_ack`` come back.
-  It feeds the L1 caches → the AXI master → PS-DDR (on the board) or the BFM
-  memory (in the testbench).
-* **The port-I/O bus** (``io_*``, the "PMIO" bus) — every ``IN``/``OUT``. The
-  core raises ``io_req`` with ``io_addr`` (the 16-bit port), ``io_we`` (direction),
-  ``io_size`` (1/2/4 bytes), and ``io_wdata``, then **parks in the ``S_IO`` state
-  until ``io_ack``**.
+* **64-bit AXI4 Memory Master** (``ven_axi_master.sv`` behind ``ven_l1d.sv`` and
+  ``icache.sv``) — carries 32-byte burst cache-line fills, write-back evictions,
+  and byte-exact non-cacheable (UC) MMIO reads/writes. Non-cacheable reads are
+  fragmented into aligned power-of-two single-beat ``AR`` requests with exact
+  ``ARSIZE`` so adjacent device lanes are never disturbed and no transaction
+  crosses a 4 KiB page boundary.
+* **Port-I/O Seam** (``io_*``) — carries ``IN``, ``OUT``, ``INS``, and ``OUTS``
+  transactions (16-bit port address, 1/2/4-byte width, read/write strobes). The
+  core parks in ``S_IO`` until the platform returns ``io_ack`` and after any
+  required external memory drain completes.
 
-The distinction matters: a *port* peripheral (PIC, PIT, UART, …) lives on the
-port-I/O bus; a *memory-mapped* region (the VGA framebuffer at ``0xA0000``) lives
-on the memory bus. They are decoded by different logic and never interfere.
+Deployed PC/AT chipset integration (``ven_ao486_shim`` + ``ao486_MiSTer``)
+==========================================================================
 
-Anatomy of a port-I/O transaction
-=================================
+In both ``ao486-sim/`` and the RK-XCZU15EG-F FPGA build (``rtl_ven_core.f`` +
+``rtl_ven_soc.f``), ``ao486-sim/ven/ven_ao486_shim.sv`` and
+``ven_axi2avalon.sv`` replace the 486 CPU inside ``3rd-party/ao486_MiSTer/rtl/system.v``:
 
-``OUT 0x21, AL`` (mask the PIC) or ``IN AL, 0x60`` (read the keyboard) both run
-the same cycle in ``ventium_soc``:
+* **Full PC/AT Peripherals in PL RTL:** Cascaded ``8259A`` master/slave PICs
+  (``0x20``/``0xA0``), ``8254`` PIT (``0x40–0x43``), dual ``8237`` DMA
+  controllers (``0x00–0x0F``, ``0xC0–0xDF`` + page registers), ``MC146818``
+  RTC/CMOS (``0x70``/``0x71``), ``8042`` PS/2 keyboard & mouse controller
+  (``0x60``/``0x64``) + Port-92 fast-A20 (``0x92``), primary/secondary IDE
+  (``0x1F0``/``0x170``) and floppy (``0x3F0–0x3F7``), full SVGA/VGA planar &
+  linear controller (``0x3B0–0x3DF``, ``0xA0000–0xBFFFF``), and Sound Blaster 16
+  + Yamaha OPL3 FM synthesis (``0x220``/``0x388``).
+* **No Enabled Outer L2:** The ``ao486`` chipset's legacy outer L2 cache wrapper
+  is bypassed; the deployed hardware relies exclusively on Ventium's full P5
+  **8 KiB L1 I-Cache**, **8-bank 8 KiB L1 D-Cache**, and the 16-slot posted DDR4
+  bridge below.
+* **Physical Snoop Coherence & A20:** DMA writes and self-modifying CPU stores
+  snoop both ``ven_l1d`` and ``icache`` using physical page tags (``ic_ptag``),
+  avoiding linear-alias staleness across paging remaps. Changes to the combined
+  8042/Port-92 A20 gate trigger ``a20_flush`` across executable caches.
 
-.. code-block:: text
+16-slot posted DDR4 bridge & external-drain barrier
+===================================================
 
-   1. core decodes IN/OUT -> enters S_IO, drives io_req=1, io_addr=port,
-      io_we=dir, io_wdata=data.  The core is now STALLED.
-   2. ventium_soc's PMIO decoder (a big always_comb) computes one chip-select
-      per device from io_addr:  cs_pic = io_req && (io_addr==0x20 || 0x21 || ...)
-      cs_pit, cs_rtc, cs_uart, ...  At most one cs is high.
-   3. the selected device sees cs=1 this clock: a WRITE commits on the posedge;
-      a READ drives its register byte COMBINATIONALLY onto its rdata.
-   4. a priority read-mux selects the live device:
-        io_rdata = cs_pic ? pic_rdata : cs_pit ? pit_rdata : ... : 32'd0
-      and io_ack = io_req (same-cycle), so the response is ready THIS clock.
-   5. at the posedge the core latches io_rdata (for an IN) and leaves S_IO ->
-      the instruction retires.  An undecoded port acks with 0 (never stalls).
+``fpga/ven_ddram_axi_posted.sv`` sits between the PC/AT memory arbiter (running
+on ``mmcm_clk``, ``40.000 MHz`` nominal) and the ZynqMP ``128-bit @ 100 MHz``
+``S_AXI_HP0_FPD`` port (mapped to the ``256 MiB`` Linux ``no-map`` reserved DDR4
+window ``0x6000_0000–0x6FFF_FFFF``):
 
-So a port access is **one clock** in the common case. The core stalling on
-``io_ack`` is the hook that lets a slow device take longer (DMA, or a PS-offloaded
-device — see below) without any change to the core.
+1. **16-Slot Posted Write Queue & RAW CAM Bypass:** Cache writebacks and burst
+   stores enqueue into a 16-entry FIFO so the CPU/L1D is not stalled on full
+   ZynqMP DDR4 write round-trips. Incoming DDR reads probe a content-addressable
+   comparator (CAM) across all 16 in-flight posted slots, forwarding or draining
+   matching addresses so read-after-write order is exact.
+2. **True Architectural Drain Barrier:** Because posted write acceptance is
+   **not** external DDR4 ``BVALID`` completion, Ventium preserves a strict
+   hardware drain/fault barrier before serializing boundaries — specifically
+   **port I/O (IN/OUT), PS-initiated debug halts, guest resets, and
+   runtime MMCM clock changes** (``50440003`` drained status check).
 
-The device interface contract
-==============================
+Interrupt delivery (``INTR`` / ``INTA``)
+========================================
 
-Every port peripheral (``rtl/soc/ven_*.sv``) presents the same small interface,
-so the decoder treats them uniformly:
-
-.. code-block:: systemverilog
-
-   module ven_<dev> (
-     input  clk, rst,            // rst is synchronous, ACTIVE-HIGH (PC RESET)
-     input  cs,                  // the SoC asserts this only on a port hit
-     input  we,                  // 1 = OUT (CPU write), 0 = IN (CPU read)
-     input  [15:0] addr,         // the I/O port (device decodes the offset)
-     input  [7:0]  wdata,
-     output [7:0]  rdata,        // COMBINATIONAL off the registers
-     // + device-specific outputs (irq lines, the A20 gate, a tx byte, ...)
-   );
-
-Two rules make these models bit-exact and same-cycle:
-
-* **Reads are combinational** off the registered state (``rdata`` is valid the
-  clock ``cs`` is up), so ``io_ack`` can be combinational.
-* **Read side-effects are clocked.** A read that mutates state (the UART LSR
-  clear, the RTC ``REG_C`` read-then-clear, the 8042 OBF dequeue, the FDC FIFO
-  advance, the VGA DAC auto-increment) applies that change on the posedge where
-  ``cs && !we``, exactly once per access. Writes commit on the posedge where
-  ``cs && we``. This is the "combinational value, clocked effect" split that
-  keeps a read both same-cycle and side-effect-correct.
-
-Memory-mapped devices and A20
-=============================
-
-Not every device is a port. The VGA **framebuffer** is the mode-13h pixel memory
-at ``0xA0000``: it is spliced into the **memory** path. When the VGA is in
-chain-4 mode, ``ventium_soc`` decodes core memory accesses in
-``0xA0000–0xAFFFF`` to ``ven_vga_fb`` (intercepting ``mem_rdata`` for that
-aperture and routing writes to the VRAM) instead of backing RAM; outside that
-mode the region is ordinary memory. The same splice pattern is how a future
-memory-BAR device (a framebuffer/MMIO PCI card) would attach.
-
-**A20.** Before the memory request leaves the SoC it passes the classic A20 gate:
-``eff_a20 = kbc_a20 | p92_a20`` (the 8042 output-port A20 bit OR the port-92
-bit 1). When A20 is masked, physical address bit 20 is forced low — the 1 MiB
-wraparound — exactly as the real chipset does.
-
-Interrupt delivery
-==================
-
-A peripheral signals work with an **IRQ line**. The lines are gathered into a
-16-bit vector and fed to the cascaded 8259A pair:
+Peripheral IRQ lines (PIT ``IRQ0``, PS/2 keyboard ``IRQ1`` & mouse ``IRQ12``,
+floppy ``IRQ6``, Sound Blaster ``IRQ5``/``IRQ7``, RTC ``IRQ8``, IDE
+``IRQ14``/``IRQ15``) feed the cascaded ``8259A`` pair in ``pic.v``:
 
 .. code-block:: text
 
-   pit_out0  -> IR0     uart  -> IR4     rtc   -> IR8 (slave)
-   kbd       -> IR1     fdc   -> IR6     mouse -> IR12 (slave)
-   ide       -> IR14/15 (slave, polled/nIEN -> quiescent)
-        |
-        v
-   ven_pic (8259A master + slave cascade, 0x20/0x21 + 0xA0/0xA1)
-        |  int_out (INTR)
-        v
-   core:  takes INTR only when EFLAGS.IF=1 and no STI/MOV-SS shadow ->
-          pulses inta -> the PIC supplies inta_vector -> the core runs the
-          EXISTING IDT delivery FSM (the same S_INT_GATE -> S_INT_CS -> push
-          path a hardware fault uses).
+   Device IRQs ──► 8259A Master/Slave (pic.v) ──INTR──► ventium_top (core.sv)
+                        ▲                                     │
+                        └──────── INTA / 8-bit vector ◄───────┘
 
-The core's decode priority is **SMI > NMI > maskable INTR**. Several IRQ lines
-are wired but driven quiescent (the polled IDE channels, a PS-placed device's
-tied-off IRQ), so they are present for a real workload yet cannot perturb the
-single-step differential — qemu's gdbstub masks async IRQ during single-step, so
-the directed tests run with interrupts disabled by construction.
+``core.sv`` arbitrates interrupts strictly at instruction boundaries with
+architectural priority **SMI > NMI > maskable INTR** (honoring ``EFLAGS.IF`` and
+``STI`` / ``MOV SS`` / ``POP SS`` inhibit shadows), completes the ``INTA``
+vector handshake, and dispatches through the real-mode IVT or protected/V86-mode
+IDT (including hardware stack switches via ``ven_frame_plan.sv``).
 
-Direct memory access (DMA)
-==========================
+ZynqMP ``0xA000_0000`` management, media, & clock control
+=========================================================
 
-Two DMA mechanisms coexist:
+Rather than emulating PC/AT registers in software, the ZynqMP Cortex-A53 PS
+services backing media and telemetry over two dedicated PL interfaces:
 
-* **Legacy 8237 DMA** (``ven_i8237`` ×2, channels 0–7). The CPU programs the
-  channel base address/count, mode, and mask through the port-I/O bus
-  (``0x00–0x0F`` + page registers, and the secondary at ``0xC0–0xDF``). The
-  register surface (the LSB/MSB flip-flop, status, mask, page registers) is what
-  the SoC models; the *actual transfer* (a device asserting DREQ) is the
-  oracle boundary.
-* **IDE bus-master DMA**. ``ven_ide``'s DMA engine has its own memory-master port
-  (``ide_dma_mem_*``) muxed into the shared ``mem_*`` bus by a 2-master priority
-  selector. When the CPU launches a transfer (the BMIC-START ``OUT``), the SoC
-  **holds ``io_ack=0`` for the whole burst** so the core parks in ``S_IO`` (its
-  memory bus idle) while the DMA owns it — exactly qemu's synchronous
-  ``bmdma_cmd_writeb``. This reuses the same stall-until-ack contract a normal
-  port access relies on.
+* **64 KiB AXI-Lite Aperture (M_AXI_HPM0_FPD @ 0xA000_0000,
+  ven_mgmt_axil.v):** Drives the MiSTer ``mgmt_*`` bus to load BIOS/VGA ROMs
+  and stream IDE/floppy sectors on demand, feeds hardware PS/2 keyboard & mouse
+  injection mailboxes (``ven_ps2_mailbox.sv``), and exposes the ``ven_soc_dbg``
+  on-die debug/PMU banks (64-bit ``primary/U`` and ``total U+V`` retirement
+  counters, forensic freeze context, quiescent boundary halt/step/breakpoint,
+  and AXI read/write profilers; see :doc:`/debug-instrumentation`).
+* **Passive Framebuffer Capture (ven_video_capture.sv):** Taps rendered VGA
+  frames into a 128-RAMB36 dual-port buffer for lossless RGB332 host streaming
+  without perturbing CPU or DDR4 timing.
+* **Programmable Core Clock (ven_pll_ctrl.sv):** Reprograms a dedicated
+  ``MMCME4_ADV`` (``100 MHz * 10 / N``, boot ``N = 25`` → ``40.000 MHz``) via
+  XAPP888 DRP over EMIO GPIO while guest reset is held and posted DDR4 writes
+  are verified drained.
 
-PCI configuration space
-=======================
+Historical standalone ``ventium_soc`` bring-up model
+====================================================
 
-The SoC answers PCI config cycles through a small shim: ``CONFIG_ADDRESS``
-(``0xCF8``, a dword latch) selects bus/devfn/register, and ``CONFIG_DATA``
-(``0xCFC``) reads/writes the selected config dword. Today it implements the
-single PIIX3 IDE function (so the BIOS can map the bus-master IDE BAR4); a device
-with a programmable I/O BAR is then decoded like ``cs_bmide`` — gated on
-``PCI_COMMAND.IO`` and the programmed BAR base. Generalising the shim to a full
-per-devfn config space is the step a discoverable add-in card (e.g. a graphics
-card) would need.
-
-Moving a peripheral to the PS A53
-=================================
-
-Because the core **stalls until ``io_ack``**, a port peripheral does not have to
-live in the PL at all. When a device is PS-placed, its port range is decoded into
-``io_ps_sel`` and forwarded on the ``io_ps_*`` bridge to ``ven_soc_axil`` → the
-A53, which runs the device's C model and acks back. The round-trip latency is
-invisible to correctness — only the returned value matters — so the same
-per-record differential holds. This is how the design fits the congestion-bound
-KV260 fabric; the full mechanism, the config knob, and the verification are in
-:doc:`/soc/peripheral-split`.
-
-Boot
-====
-
-The bare-metal images boot the way a real PC does. The image is a BIOS at
-``F000:FFF0``; the core cold-resets there in system mode (``boot_mode=1``),
-transitions real → protected (``CR0.PE``, a CS far-jump to a flat 32-bit segment),
-and — for a disk boot — chain-loads sector 0 from the IDE disk to ``0000:7C00``
-and far-jumps into it (the ``pbootrm``/``pbootdma`` gates exercise exactly this).
-From there it programs the chipset over the buses described above.
-
-Why it is verifiable
-====================
-
-Every device interaction in this system is either **synchronous** (a register
-``IN``/``OUT`` or an A20-masked memory access) or an explicitly-bounded
-asynchronous path (a host-clock RTC tick, a DMA transfer, a device queue) that is
-held quiescent. The synchronous surface single-steps deterministically, so each
-peripheral is graded **per-record** against ``qemu-system-i386`` — the architectural
-state after *every retired instruction* must match byte-for-byte. The same bar
-applies whether a device runs in RTL or as a PS C model. The aggregate of these
-gates is ``verif/soc/run-all-soc-gates.sh``.
+During early bare-metal CPU bring-up (prior to integrating ``ao486_MiSTer``), a
+lightweight single-clock ``ventium_soc`` wrapper paired ``ventium_top`` with
+minimal ``ven_*`` register models (combinational ``rdata`` on ``cs && !we``,
+clocked read/write side-effects on ``posedge clk``) so directed assembly tests
+and ``test386`` could be compared per-instruction against ``qemu-system-i386``
+with async IRQs masked. That bring-up harness has been retired on both
+``main`` and ``experimental/uv-fast-ipc-apr`` in favor of the full PC/AT
+platform documented above and the ``make verify`` / ``make verify-sys`` /
+``ao486-sim`` verification suites.

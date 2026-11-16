@@ -1,148 +1,101 @@
-# Ventium RTL (`rtl/`) — block map
+# Ventium RTL (`rtl/`) — Module & Filelist Guide
 
-Synthesizable SystemVerilog replica of the Intel Pentium (P5/P54C). Through
-M1–M5 + M5B the real integer/x87/pipeline/cache/bus logic was built up inside a
-single spine; the codebase was then *modularized* in two behaviour-preserving
-passes (docs/rtl-refactor-plan.md):
+Synthesizable SystemVerilog reconstruction of the non-MMX Intel Pentium (**P5/P54C**, Family 5).
 
-- **R1** decomposed the former monolith `core/intcore.sv` into shared packages +
-  the `decode` / `issue_uv` leaf modules, and renamed the monolith to
-  `core/core.sv` (module `core`).
-- **R2** lifted further leaf modules out of the spine *verbatim*: the BTB
-  (`bpred_btb.sv`), the L1 cache arrays + the D-cache timing model
-  (`icache.sv`, `dcache_timing.sv`), the split TLB arrays (`tlb.sv`), the x87
-  architectural state file (`fpu_top.sv`), and the system / x87 helper packages.
+## Current Hardware & Branch Baseline (Nov 2026)
 
-Everything listed below is a **real file that carries live logic** — there are no
-empty stub files. What is *not* yet a separate module still lives in the
-`core.sv` spine (see the note after the table). M6 layered selectable silicon
-errata into the datapath, M8 added the SoC integration top + peripheral models,
-and M8.5 added the optional radix-4 SRT divider (all in existing files).
+- **Target FPGA Platform:** **RK-XCZU15EG-F** (`xczu15eg-ffvb1156-2-i`), AMD Vivado **2025.2**.
+- **Board-Qualified Release (`main`, image `c0e3fe43`, `161` defines):** Post-route static timing closed at **`40.264133 MHz`** (`WNS = +0.164 ns`, `WHS = +0.010 ns`, `0` `>=85%` congestion hotspots, `171,819` LUTs / `50.35%`, `30,703` CLBs / `71.97%`, `39,520` FFs, `277.5` BRAM tiles, `47` DSP48E2). Passes both standard CoreMark CRC seeds (`2.100128 / 2.106796 CM/MHz`), cold Windows 95 OSR2 GUI + shutdown, and cold DOS Quake `demo1` (`8.0 FPS`, `969` frames / `121.2 s`), with **`0.515778001` total U+V gameplay IPC** (`0.397847833` primary/U-only, including `REP`-element retirement) across interior cycles `28,696,827,616–32,989,404,795` (up from `2886d24c`'s `0.496499864` total U+V / `0.383002768` primary/U).
+- **Development Branch (`experimental/uv-fast-ipc-apr`):** Holds ongoing core/cache/APR work and the Verilator/QEMU differential harness; post-freeze experimental RTL edits are unmeasured on physical gameplay unless re-qualified.
 
-Two pinned filelists drive the builds (packages first, then modules):
-`rtl/ventium.f` (core + `ventium_top`) and `rtl/ventium_soc.f` (the SoC
-integration top `ventium_soc`). They replaced the old `$(wildcard rtl/**)` glob,
-whose alphabetical order put packages after their consumers. `verif/tb/Makefile`
-and the lint target build via `-f rtl/ventium.f`.
+Authoritative interface and trace contracts:
+- [`../docs/rtl-interface.md`](../docs/rtl-interface.md) — `ventium_top` ports, DPI-C retirement callbacks (`vtm_retire`, `vtm_retire_x87`, `vtm_retire_cycle`, `vtm_fp_async_event`), AXI replay, and cached-store policy.
+- [`../docs/trace-format.md`](../docs/trace-format.md) — `.vtrace` JSON Lines functional, system, x87, and cycle record schemas.
 
-Contracts this directory implements (read these, not this README, when in doubt):
-- [`../docs/rtl-interface.md`](../docs/rtl-interface.md) — top ports (§1, §3),
-  the DPI `vtm_retire`/`vtm_retire_x87`/`vtm_retire_cycle` imports (§2).
-- [`../docs/trace-format.md`](../docs/trace-format.md) — the `.vtrace` fields
-  the retire callback feeds (§2.2).
-- [`../docs/rtl-refactor-plan.md`](../docs/rtl-refactor-plan.md) — the R1
-  decomposition table + interface design (the source for the block map below).
-- [`../PLAN.md`](../PLAN.md) — §2 (target µarch + parameters), §6 (block
-  decomposition), §7 (milestones).
+---
 
-## Build / lint
+## Ordered Filelists (Never Glob RTL)
 
-The authoritative build is the Verilator testbench (`verif/tb/`, driven by
-`make verify` from the repo root). A standalone lint (no DPI symbol) is:
+Every SystemVerilog file follows **one module/package per file** (`*_pkg.sv` packages compiled before importing modules, raw `core_*.svh` state-machine fragments included only by `core.sv`). Never compile via `$(wildcard rtl/**)` globs:
+
+| Filelist | Scope & Consumers |
+| --- | --- |
+| [`rtl/ventium.f`](ventium.f) | Standalone `ventium_top` core + caches + TLBs + `fp_shared/` + P5 `biu` (paths relative to `rtl/`). Used by `verif/tb/Makefile` and `verif/lint/run-lint-gate.sh` (`L1AXI_RTL` appends `ven_l1d.sv`, `ven_axi_master.sv`, `ventium_l1_axi.sv`, and `ven_cachemap.sv` when `+define+VEN_L1_AXI` is enabled). |
+| [`../rtl_ven_core.f`](../rtl_ven_core.f) | Full `ao486`-integrated CPU + `fp_shared/` + banked `ven_l1d` + `ventium_l1_axi` + `ven_cachemap` + `ao486-sim/ven/ven_axi2avalon.sv` + `ven_ao486_shim.sv` (repo-root relative). Used by full-PC simulation (`ao486-sim/`) and RK-XCZU15EG-F Vivado synthesis (`fpga/`). |
+| [`../rtl_ven_soc.f`](../rtl_ven_soc.f) | Vendored MiSTer PC/AT chipset & peripheral RTL (`3rd-party/ao486_MiSTer/`: `system.v`, PIC, PIT, DMA, RTC, PS/2, IDE, floppy, VGA, Sound Blaster 16 + OPL3, bypassed outer L2 wrapper). Note: the earlier standalone `rtl/soc/` toy peripheral directory has been retired in favor of this full PC/AT platform. |
+
+---
+
+## Lint & Verification
+
+From the repository root, run the multi-profile lint gate (keeps `IMPLICIT`, `PINMISSING`, `UNDRIVEN`, `MULTIDRIVEN`, `LATCH`, and `UNOPTFLAT` fatal across default, L1-AXI, and FPGA define sets):
+
+```sh
+make lint   # runs bash verif/lint/run-lint-gate.sh
+```
+
+For a direct standalone Verilator lint check without DPI imports (maintainer host Verilator `/tools/verilator/v5.046/bin/verilator`):
 
 ```sh
 cd /home/yukidama/github/ventium/rtl && \
-verilator --lint-only -Wall -Wno-UNUSED \
-  -sv --top-module ventium_top -f ventium.f +define+VTM_NO_DPI
+/tools/verilator/v5.046/bin/verilator --lint-only -sv -Wall -Wno-UNUSED -Wno-fatal \
+  -Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN \
+  -Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT \
+  --top-module ventium_top -f ventium.f +define+VTM_NO_DPI
 ```
 
-The packages supply all shared types/functions; `import …::*` in each module
-resolves them (no `` `include `` needed). It also lints with the DPI import
-present (drop `+define+VTM_NO_DPI`); the testbench phase does the full
-`--cc --exe` build that binds the C++ `vtm_retire`.
+---
 
-### Warning waivers (kept minimal)
-- `-Wno-UNUSED` — a few intentionally partial signals in `core.sv` (and
-  read-only array ports exposed by the R2 leaf modules back to the spine) carry
-  documented-but-not-fully-consumed bits; the command-line waiver covers them.
-- `-Wno-DECLFILENAME` — **dropped** in R1. Every file now satisfies
-  *file name == module/package name* (one module per file), so the waiver is no
-  longer needed.
+## Block Map
 
-No other waivers are required.
+### 1. Packages (Compiled First)
 
-## Block map (what is actually in `rtl/`)
-
-`ventium_top` instantiates the spine `core` plus the R2-extracted leaf modules;
-`soc/ventium_soc.sv` is the alternative top that wraps the same `core` with the
-PC-platform peripheral models. Every file below carries live logic.
-
-### Packages (shared types + pure functions, compiled first)
 | File | Contents |
-|---|---|
-| `ventium_pkg.sv` | shared architectural-state types + the DPI retire import |
-| `core/ventium_alu_pkg.sv` | ALU-op encoding + ALU/flags/shift/rotate pure functions (`alu_result`, `flags_next`, `shrot_*`, `shld_*`, `wmask`/`sbit`/`sbit2`/`parity8`) — R1 |
-| `core/ventium_decode_pkg.sv` | decode enums (`kind_e`/`smk_e`/`st_e`/`ctk_e`/`fxop_e`), the `fpd_t` decoded-uop struct + `FK_*`, helpers `mfl`/`is_prefix`/`cond_true` — R1 |
-| `core/ventium_sys_pkg.sv` | system-mode pure helpers: GDT/LDT descriptor field extraction, segment type/attr predicates, the descriptor-load fault decision + IDT vector, the 32-bit TSS byte-offset tables, the addr-size ModR/M length helper — R2 |
-| `core/ventium_x87_pkg.sv` | x87 instruction-level helpers wrapping `fpu_x87_pkg`: compare codes, NaN classifiers, the #IA/#ZE/#PE decision, FXAM/FCONST tables, mem-operand coercion, the masked-default arithmetic evaluator (`f_eval`) — R2 |
-| `fpu/fpu_x87_pkg.sv` | the 80-bit `floatx80` datapath (`fx_add/mul/div/sqrt`, rounding, conversions) — M3; also the M6 FDIV/FIST errata models and the optional M8.5 radix-4 **SRT divider** (`fx_srt_div`) |
+| --- | --- |
+| `ventium_pkg.sv` | Architectural state types and DPI-C retirement imports (`vtm_retire`, `vtm_retire_x87`, `vtm_retire_cycle`, `vtm_fp_async_event`), guarded by `VTM_NO_DPI`. |
+| `core/ventium_alu_pkg.sv` | Integer ALU/shift/rotate opcodes and pure result/EFLAGS helpers (`alu_result`, `flags_next`, `shrot_*`, `shld_*`, width/sign/parity helpers). |
+| `core/ventium_decode_pkg.sv` | Decode enums (`kind_e`, `smk_e`, `st_e`, `ctk_e`, `fxop_e`), fast-path decoded uop struct `fpd_t` (`FK_*`), and ModR/M/condition helpers. |
+| `core/ventium_sys_pkg.sv` | Protected-mode & paging pure helpers: GDT/LDT descriptor extraction, access/privilege classifiers, fault-vector selection, and 32-bit TSS offset tables. |
+| `core/ventium_x87_pkg.sv` | Instruction-level x87 helpers wrapping `fpu_x87_pkg`: compare codes, NaN/FXAM classifiers, constant ROMs, and masked-exception evaluators. |
+| `fpu/fpu_x87_pkg.sv` | 80-bit IEEE-754 `floatx80` arithmetic, rounding (`fx_round_pack_c1`), integer/FP/BCD conversions, and optional Pentium FDIV/FIST errata helpers. |
 
-### Modules
-| File | What it is | STATUS |
-|---|---|---|
-| `ventium_top.sv` | top: port list + the single DPI retire point; wires `core` + the leaf modules | REAL |
-| `core/core.sv` | the integer/pipeline **spine** (~4.3k lines): the PF/D1/D2/EX/WB FSM, AGI interlock, the slow-path microsequencer, the 2-level page-table walk, the integer execution datapath + GPR file + bypass, the x87 scoreboard, and retire. Instantiates the leaf modules below. Renamed from `intcore.sv` in R1. | REAL (M1–M5) |
-| `core/decode.sv` | fast-path variable-length decoder (MOV/ALU/INC-DEC/LEA/load/shift/Jcc + cycle-mode x87 reg-form whitelist) → `fpd_t` | REAL (R1) |
-| `core/issue_uv.sv` | U/V pairing checker (AP-500 classes) → `pair_ok` | REAL (R1) |
-| `core/bpred_btb.sv` | 256-entry, 4-way BTB + 2-bit/4-state predictor (arrays + lookup/update), accessed in D1 | REAL (R2) |
-| `mem/icache.sv` | L1 I-cache arrays + line fill + LRU-touch (8 KB / 2-way / 32 B = 128 sets); arrays exposed read-only to the spine | REAL (R2) |
-| `mem/dcache_timing.sv` | L1 D-cache **timing** model — tag/valid/LRU only (no data array; load data comes from the bus) so the spine knows *when* a load completes | REAL (R2) |
-| `mem/tlb.sv` | split I/D TLB arrays (16-entry, direct-mapped) + lookup + fill-commit + CR3 flush; the page-table *walk* stays in the spine | REAL (R2) |
-| `fpu/fpu_top.sv` | x87 architectural **state file** — `fpr[8]` 80-bit stack, `ftop`/`fctrl`/`fstat`/`fptag`, FNINIT reset, `st(i)` addressing (the datapath is `fpu_x87_pkg`, the sequencing is in the spine) | REAL (R2) |
-| `bus/biu_p5.sv` | standalone pin-level 64-bit P5 external bus FSM (ADS#/BRDY#/NA#/KEN#/CACHE#/HITM#…, burst order); SVA-verified, imports nothing from `rtl/` | REAL (M5B) |
-| `bus/biu.sv` | gated integration wrapper that routes core memory through `biu_p5` — **default-OFF** (the default datapath uses the M0 bus-functional model in the spine) | REAL (M5B-int, default-OFF) |
+### 2. Top Wrapper & Integer Superscalar Core (`rtl/core/`)
 
-Reference pages per block: Pentium Dev. Manual Vol.1 (241428) ch.2–3, Alpert &
-Avnon (IEEE Micro 1993), AP-500 (241799) + Agner Fog for timing/pairing, IA-32
-SDM (243190/92) for the ISA/system semantics, Datasheet 241997-010 for the bus —
-see `docs/sphinx/reference-library.rst`.
+| File | Architectural Role |
+| --- | --- |
+| `ventium_top.sv` | Core subsystem top: wires `core` to I/D caches, TLBs, `fp_shared`, optional `ventium_l1_axi` / `biu`, debug telemetry, and the single DPI retirement point. |
+| `core/core.sv` + `core/core_*.svh` | Central 5-stage (`PF`/`D1`/`D2`/`EX`/`WB`) pipeline spine, `S_PIPE` protected-mode U+V fast path, split-page fragment engine, 2-level hardware page walker, and microsequencer. Includes 30 raw `core_*.svh` fragments (`core_fastpath.svh`, `core_fetch_decode.svh`, `core_exec.svh`, `core_gpr_wb.svh`, `core_bus_driver.svh`, `core_load.svh`, `core_store_useq.svh`, `core_seg_ljmp.svh`, `core_int_deliver.svh`, `core_iret.svh`, `core_tss_priv.svh`, `core_tsw.svh`, `core_walk.svh`, `core_smm.svh`, `core_fp_exec.svh`, `core_fp_async.svh`, `core_fenv.svh`, `core_io*.svh`, etc.). |
+| `core/decode.sv` | Dual-slot fast-path instruction decoder producing `fpd_t` records for `S_PIPE` (`MOV`, `ALU`, `PUSH`/`POP`, `LEA`, `MOVZX`/`MOVSX`, shifts, branches, and fast x87 dispatch). |
+| `core/decode_stages.sv` | Full variable-length prefix/ModR/M/SIB/system/x87 decoder feeding the multi-cycle execution states and complex instructions. |
+| `core/issue_uv.sv` | Intel AP-500 dual-issue pairing checker (`UV`/`PU`/`PV`/`NP` classes, register RAW/WAW interlocks, ESP/EFLAGS special pairs). |
+| `core/u_pipe.sv`, `core/v_pipe.sv`, `core/uv_common.sv` | Combinational U-pipe (full ALU/shift) and V-pipe (ALU/branch) integer datapaths, plus shared BCD/ASCII adjust (`DAA`/`DAS`/`AAA`/`AAS`/`AAM`/`AAD`) and U→V flag forwarding. |
+| `core/regfile.sv` | Registered 32-bit GPR file (`EAX`–`EDI`) with dual boot-mode reset and per-register write enables driven from `core_gpr_wb.svh`. |
+| `core/ven_p54_dual_agu.sv` | Dual U/V effective-address generators for `S_PIPE` memory operations. |
+| `core/bpred_btb.sv` | Dual-ported **256-entry 4-way BTB** with 2-bit bimodal saturating counters (simultaneous fetch lookup and retire update). |
+| `core/ven_idiv.sv` | Synthesizable iterative radix-2 integer `DIV`/`IDIV` engine (`+define+VEN_IDIV_ITER`). |
+| `core/ven_frame_plan.sv` | Shared slot-offset planner for interrupt, trap, call-gate, and V86 stack frames (used identically by pre-probe, push, and `ESP` commit). |
+| `core/fpu_writeback.sv` | Legacy combinational x87 state-mutation driver for `rtl/fpu/fpu_top.sv` when `VEN_FP_SHARED` is disabled. |
 
-**Still inside the spine (no separate file yet).** The prefetch/instruction
-buffer, the microcode/slow-path microsequencer, the integer execution datapath +
-GPR register file + bypass network, the FPU scoreboard/sequencing, and the
-page-table-walk FSM are all modeled inside `core/core.sv`. Extracting them was
-deferred because they are too entangled with the pipeline FSM — the differential
-gate, not the file boundary, is the authority, and partial modularization that
-stays green is the rule.
+### 3. Memory, Caches, TLBs & AXI Subsystem (`rtl/mem/`, `rtl/northbridge/`)
 
-### SoC integration (`rtl/soc/`, M8 — built via `rtl/ventium_soc.f`)
-| File | What it is |
-|---|---|
-| `soc/ventium_soc.sv` | SoC top: wraps `core` (`soc_en=1`), the PMIO port decode, the A20 mask, and the interrupt wiring |
-| `soc/ven_pic.sv` | 8259A PIC, cascaded master + slave (0x20/0x21, 0xA0/0xA1) |
-| `soc/ven_pit.sv` | 8254 programmable interval timer (0x40–0x43) |
-| `soc/ven_rtc.sv` | MC146818 RTC / CMOS (0x70/0x71) |
-| `soc/ven_i8042.sv` | 8042 keyboard/mouse controller (0x60/0x64) |
-| `soc/ven_port92.sv` | port-92 fast-A20 gate (0x92) |
-| `soc/ven_vgaregs.sv` | VGA register file (0x3B0–0x3DF) |
-| `soc/ven_acpipm.sv` | ACPI PM timer (0x608) |
-| `soc/ven_ide.sv` | IDE/ATA channel model — instantiated twice: primary master disk (0x1F0/0x3F6) and secondary ATAPI CD-ROM (0x170/0x376) |
+| File | Architectural Role |
+| --- | --- |
+| `mem/icache.sv` | **8 KiB 2-way L1 I-Cache** (128 sets × 32 B lines, `8` RAMB36 data + LUTRAM tags under `VEN_IC_BRAM`), physical snoop tags (`ic_ptag`) for alias-safe self-modifying code/DMA invalidation, and fanout-replicated fill path. |
+| `mem/ven_predecode_len.sv`, `mem/uopcache.sv` | Instruction-length predecoder and predecoded micro-op cache (`+define+VEN_UOPCACHE`). |
+| `mem/ven_l1d.sv` | **8 KiB 2-way L1 D-Cache** (128 sets × 32 B lines, write-back/write-allocate + uncacheable byte-exact bypass, physical snoop invalidation, cached-store policy). |
+| `mem/ven_p54_bank_arb.sv`, `mem/ven_p54_hit_return.sv`, `mem/ven_p54_bram_bank.sv`, `mem/ven_p54_bram_data.sv` | 8-way 32-bit word-interleaved P54C D-cache bank arbitration, dual-port U+V read hit return, and BRAM bank wrappers. |
+| `mem/tlb_assoc.sv`, `mem/tlb.sv` | `tlb_assoc.sv` implements the deployed **64-entry 4-way D-TLB** (`VEN_DTLB_ASSOC_4WAY`) and **32-entry 4-way I-TLB** (`VEN_ITLB_ASSOC_4WAY`) with pseudo-LRU replacement; `tlb.sv` retains the 16-entry direct-mapped unit-TB baseline. |
+| `mem/ventium_l1_axi.sv`, `mem/ven_axi_master.sv`, `mem/ventium_l1_axi_top.v` | L1D-to-64-bit AXI4 master subsystem (burst line fills, write-back/eviction, byte-exact narrow UC reads/writes, `route_err` guard) plus Verilog-2001 Vivado BD wrapper (`ventium_l1_axi_top.v`). |
+| `mem/ven_axi_cdc.sv`, `mem/ven_cdc_afifo.sv`, `mem/ven_reset_sync.sv` | Asynchronous FIFO AXI4 clock-domain crossing and reset synchronizer primitives. |
+| `northbridge/ven_cachemap.sv` | 430FX-style PAM/TOM physical memory-type and cacheability classifier (`KEN#` equivalent, VGA/ROM/PCI-hole/SMRAM region decode). |
+| `mem/dcache_timing.sv` | Legacy tag-only L1D cycle-penalty model used **only** in standalone non-`VEN_L1_AXI` unit testbenches (compiled out on FPGA / `VEN_L1_AXI`). |
 
-## Retire / DPI point (what `ventium_top` actually does)
+### 4. x87 Floating-Point Hierarchy (`../fp_shared/` & `rtl/fpu/`)
 
-`ventium_top` owns the top port list (rtl-interface.md §1,§3) and the **single
-DPI retire point** (§2). The `core` spine raises `retire_valid` for one clock per
-committed instruction with the post-commit architectural state (plus the paired
-`retire2_*` for a dual-issued V instruction and the x87/cycle side-channels);
-`ventium_top` translates each into `vtm_retire` / `vtm_retire_x87` /
-`vtm_retire_cycle` calls, maintaining the monotonic retire counter `n`.
+- **Production Shared x87 FPU (`../fp_shared/`, `+define+VEN_FP_SHARED`):** `ven_fp_top.sv` + `ven_fp_fxch_queue.sv` (zero-cycle `FXCH` rename/ordered admission slot) + `ven_fp_state.sv` (pointer-mapped 8×80-bit stack) + `ven_fp_alu.sv` (pipelined add/sub/mul) + `ven_fp_misc.sv` (compares, conversions, stores, environment) + `ven_fp_trans.sv` / `ven_fp_widemul.sv` / `ven_fp_estdiv.sv` (table-driven polynomial transcendentals). Consumes `72,204` LUTs and `38` DSP48E2 slices in `c0e3fe43` (down from `155k+` LUTs / `1,405` DSPs in split leaf engines). See [`../fp_shared/README.md`](../fp_shared/README.md).
+- **Shared Leaf Services & Legacy Reference (`rtl/fpu/`):** `fpu_srt_div.sv` (unified radix-4 SRT `FDIV`/`FSQRT`/`FPREM`/`FPREM1` engine used by `ven_fp_top`), `ven_bcd.sv` & `ven_bcd_to_fp.sv` (iterative `FBSTP`/`FBLD` engines used by `ven_fp_top`), `fpu_*_rom.svh` constant tables, and the legacy non-shared modules (`fpu_top.sv`, `fpu_fx_ppl.sv`, `fpu_estdiv.sv`, `fpu_f2xm1.sv`, `fpu_fpatan.sv`, `fpu_fprem.sv`, `fpu_fyl2x.sv`, `fpu_fsincos.sv`, `fpu_sqrt_iter.sv`).
 
-The memory port group (`mem_*`, rtl-interface.md §3) carries the live fetch /
-load / store traffic the spine drives.
+### 5. External Bus & Full-PC Platform Integration (`rtl/bus/`, `ao486-sim/`, `fpga/`)
 
-## Integration notes
-
-- **DPI guard.** The `vtm_retire` import lives in `ventium_pkg.sv`, fenced by
-  `` `ifndef VTM_NO_DPI ``; the call site in `ventium_top.sv` is fenced the same
-  way. Standalone lint defines `VTM_NO_DPI`; the TB build leaves it undefined and
-  links a C++ `extern "C" void vtm_retire(...)` matching the §2 signature
-  (verified here against the exact arg widths: `longint→uint64_t`,
-  `int→uint32_t`, `shortint→uint16_t`).
-- **Parameters for the TB.** Override on the `ventium_top` instance:
-  `ENTRY` (fetch base = manifest `entry`), `STEP`, `N_RETIRE` (trace length).
-- **x87 retire.** `vtm_retire_x87` (rtl-interface.md §2, trace-format.md §2.2)
-  is declared in `ventium_pkg.sv` and called from `ventium_top.sv` (live since
-  M3); `vtm_retire_cycle` carries the M4 pipe/paired cycle attribution.
-- **Compile via the filelist.** Build with `-f rtl/ventium.f` (packages before
-  modules); do not glob `rtl/**` and do not compile files individually. The
-  packages form the shared compilation unit the modules import.
+- **Pin-Level P5 BIU (`bus/biu_p5.sv`, `bus/biu.sv`):** Standalone SVA-verified 64-bit Pentium external bus state machine (`ADS#`, `BRDY#`, `NA#`, `KEN#`, `CACHE#`, `LOCK#`, `AHOLD`/`EADS#`/`HITM#`, `BOFF#`, `HOLD`/`HLDA`) and optional `bus_mode=1` protocol exerciser (`make bus bus-sva`).
+- **Full-PC Simulation & RK-XCZU15EG-F SoC:** In both `ao486-sim/` and `fpga/`, `ventium_top` + `ventium_l1_axi` connect via `ao486-sim/ven/ven_ao486_shim.sv` and `ven_axi2avalon.sv` into the MiSTer PC/AT chipset (`rtl_ven_soc.f`, outer L2 disabled/bypassed) and `fpga/rtl/ven_ddram_axi_posted.sv` (16-slot posted DDR4 write queue with CAM read-after-write bypass and architectural external-drain barrier into ZynqMP `S_AXI_HP0_FPD`).

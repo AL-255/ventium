@@ -1,165 +1,149 @@
 ==================================================================
-The FP execute/commit pipeline
+The x87 FP Execute/Commit Pipeline & Shared FPU
 ==================================================================
 
-The Pentium retires a pipelined ``FADD``/``FSUB``/``FMUL`` at **throughput 1,
-latency 3**: a new arithmetic op can issue every clock, and its result becomes
-available to a dependent op three clocks later. Ventium reproduces that timing
-with an **emergent FP scoreboard** (``core.sv``) — the result of an arithmetic op
-is *published* at ``issue + latency`` (``fadd`` = 3), and any dependent (role ≥ 2)
-consumer is stalled until that cycle.
+The Intel Pentium retires pipelined ``FADD``, ``FSUB``, and ``FMUL`` operations
+at **1-per-clock throughput and 3-clock latency** (paired with zero-cycle
+``FXCH`` register renaming). Ventium models that pipeline timing through its FP
+scoreboard and implements it on hardware via the **shared pipelined 80-bit x87
+FPU** (``fp_shared/ven_fp_top.sv`` under ``+define+VEN_FP_SHARED``) together
+with the two-stage deferred commit flags ``VEN_FP_PIPE`` and
+``VEN_FP_PIPE2``.
 
-That scoreboard is also the seam that lets the FPGA build run fast. This page
-documents how the FP *execute/commit* path is pipelined behind compile-time flags
-without disturbing a single observable cycle — and how the second stage
-(``+VEN_FP_PIPE2``) takes the half-cache KV260 (XCK26 / **K26**) build across the
-**60 MHz** line.
+.. important::
+
+   **Deployed c0e3fe43 Hardware Status (RK-XCZU15EG-F):**
+   On board-qualified image ``c0e3fe43`` (``xczu15eg-ffvb1156-2-i``, Vivado
+   **2025.2**, ``161`` defines including ``VEN_FP_SHARED``, ``VEN_FP_PIPE``,
+   ``VEN_FP_PIPE2``, ``VEN_FP_FXCH_QUEUE``, ``VEN_SRT_ITER``, and
+   ``VEN_TRANSCENDENTAL``), the entire shared 80-bit x87 FPU — stack state,
+   ``FXCH`` rename queue, pipelined add/sub/mul, radix-4 SRT div/sqrt/``FPREM``,
+   BCD, and polynomial transcendentals — fits in **72,204 LUTs and 38
+   DSP48E2 slices** (``1.08%`` of device DSPs) and closes full-SoC slow-corner
+   post-route STA at ``40.264133 MHz`` (``WNS = +0.164 ns``, ``WHS = +0.010 ns``),
+   driving DOS Quake ``demo1`` at ``8.0 FPS`` and **0.515778001 total
+   U+V gameplay IPC** (``0.397847833`` primary/U across cycles
+   ``28,696,827,616–32,989,404,795``).
 
 .. contents::
    :local:
    :depth: 1
 
-The deferred fast-arm commit (``+VEN_FP_PIPE``)
+Why combinational x87 commit breaks FPGA timing
 ===============================================
 
-In cycle mode the fast arm issues an arithmetic op and would, naively, compute its
-whole value combinationally in the issue clock — ``f_eval(op, st0, sti)`` — and
-write the x87 register file the same edge. On the FPGA that ties the **entire FADD
-datapath** (operand select → align → add → normalize → round → pack) onto the
-``eip → icache → decode → issue`` front-end path: one enormous cone in one clock.
+In a naive single-cycle model, issuing a fast-path ``FADD``/``FSUB``/``FMUL``
+evaluates ``f_eval(op, st0, sti)`` combinationally in the issue clock — chaining
+``eip → icache → decode → issue`` directly into **80-bit operand select →
+exponent alignment → 64-bit mantissa add/mul → leading-zero normalization →
+IEEE-754 fx_round_pack → x87 stack writeback**.
 
-``+VEN_FP_PIPE`` breaks it with a **1-deep defer**. The op's operands are *captured*
-at issue (cycle N) into pipeline registers ``fpp_a/fpp_b/fpp_aluop/…`` and the
-instruction retires normally; one clock later (N+1) the value is evaluated from the
-**registered** operands and written to the absolute target via a dedicated
-``we_wabs`` port on ``fpu_top``. The trick that makes this free:
+Because the Pentium scoreboard already withholds arithmetic results from
+dependent consumers until ``issue + 3``, evaluating the entire 80-bit cone in
+cycle ``N`` is unnecessary for architectural or cycle-level fidelity.
 
-   The scoreboard already publishes the result at ``issue + 3``. The deferred
-   commit lands at ``N+1`` — well before any dependent can read it — so the
-   architectural state at every retire is unchanged. The defer is **invisible to
-   correctness**; it only moves where the combinational cone sits in time.
+Stage 1: Deferred fast-arm commit (``+VEN_FP_PIPE``)
+====================================================
 
-A 1-clock read-after-write *hazard* guards the one window the defer exposes: an FP
-op that reads the in-flight target the same clock the deferred result is being
-written would see the pre-edge stale value, so it is stalled one clock. Role ≥ 2
-consumers are already scoreboard-stalled past that window, so the hazard only bites
-``FXCH``/``FLDSTI``/slow ``FST``/``FCOM`` — none of which appear in the throughput
-microbenchmarks, so the FP cycle bands (``mb_faddchain`` CPI ≈ 3, ``mb_fpindep`` at
-throughput 1) are preserved.
+``VEN_FP_PIPE`` decouples FP arithmetic evaluation from instruction fetch/decode
+with a 1-stage input capture:
 
-The wall: a latency-1 cone P&R cannot shorten
-=============================================
+* **Cycle N (Issue):** Operands and rounding/opcode controls latch into
+  ``fpp_a`` / ``fpp_b`` / ``fpp_aluop`` while the instruction retires in program
+  order.
+* **Cycle N+1 (Deferred Commit):** Arithmetic evaluates from registered
+  operands and writes the physical destination slot before any ``issue + 3``
+  dependent consumer can read it.
+* **1-Cycle RAW Hazard Guard:** Non-scoreboarded stack readers (``FXCH``,
+  ``FLD ST(i)``, slow ``FST``/``FCOM``) targeting the in-flight slot stall 1
+  clock so they never observe pre-commit data.
 
-On the half-cache K26 build the deferred commit *itself* becomes the critical path:
-``fpp → f_eval_s1 → f_eval_s2 (fx_round_pack) → fpr`` — about **80 logic levels and
-43 CARRY8 in series**, ~58 % of it routing. A full timing-driven place-and-route
-sweep (one synthesis, many directives, all over-constrained) lifts the routed Fmax
-from the production congestion directives' 50.1 MHz to **52.6 MHz**
-(``ExtraNetDelay_high`` placement) — and then stops:
+Even after detaching fetch/decode, ``fpp → f_eval_s1 → f_eval_s2 (fx_round_pack)
+→ fpr`` spans ~80 logic levels and 43 ``CARRY8`` primitives in a single cycle —
+a pure logic-depth wall that synthesis retiming cannot split across a 1-deep
+pipeline register.
 
-* **Placement** can only redistribute the route delay on the cone; a Pblock that
-  clusters the FP datapath pushes the FADD cone off the critical path but merely
-  exposes the next one (the µop-cache ``store_bmap → eip`` fill path at ~51 MHz).
-* **Retiming** cannot help: the deferred commit is a **latency-1** path — one
-  register layer between ``fpp`` and ``fpr`` — so there is nothing to balance.
-  Retiming *slides* a register along a cone; it does not *add* pipeline depth.
-* **Synthesis** itself caps at 59.4 MHz on this cone.
+Stage 2: Splitting ``f_eval_s1`` and ``f_eval_s2`` (``+VEN_FP_PIPE2``)
+======================================================================
 
-The binder is **logic depth**, not routing — so the fix has to shorten the cone.
-
-The 2-stage split (``+VEN_FP_PIPE2``)
-=====================================
-
-``f_eval`` is already factored into two functions: ``f_eval_s1`` (special-operand
-detection + the add/sub/mul *front*, ``fx_add_s1``/``fx_mul_s1``) returning an
-``fx_pipe_t`` carrier, and ``f_eval_s2`` (``fx_round_pack`` + flag assembly). The
-1-stage defer composes them in **one** clock. ``+VEN_FP_PIPE2`` inserts **one
-register** at that boundary:
+``f_eval`` factors naturally into two halves: ``f_eval_s1`` (special-operand
+classification + add/sub alignment/sum or mantissa multiply front-end, emitting
+an ``fx_pipe_t`` bundle) and ``f_eval_s2`` (normalization + ``fx_round_pack`` +
+IEEE exception flags). ``VEN_FP_PIPE2`` inserts pipeline register ``fpp2_s1``
+between them:
 
 .. graphviz::
 
    digraph fp2 {
      rankdir=LR; node [shape=box, fontsize=10, fontname="monospace"];
      issue   [label="issue N\ncapture fpp_*"];
-     s1      [label="N+1\nf_eval_s1\n(front)"];
+     s1      [label="N+1\nf_eval_s1\n(add/mul front)"];
      reg     [label="fpp2_s1\n(fx_pipe_t reg)", shape=box, style=filled, fillcolor="#cde"];
-     s2      [label="N+2\nf_eval_s2\n(round_pack)\n-> we_wabs -> fpr"];
+     s2      [label="N+2\nf_eval_s2\n(round_pack)\n-> stack write"];
      pub     [label="issue+3\nscoreboard\npublishes", shape=ellipse, style=filled, fillcolor="#dfd"];
      issue -> s1 -> reg -> s2 -> pub [style=dashed,label="<= in time"];
    }
 
-The commit now lands at **N+2** instead of N+1. Because the scoreboard still
-publishes at ``issue + 3``, ``N+2 ≤ N+3`` — the value is in ``fpr`` before any
-dependent reads it. The cone halves: the add/mul front in one clock, the
-round-pack + write in the next. The read-hazard simply widens to the now-2-deep
-in-flight window (stall a reader of either the stage-0 or stage-1 target).
+Commit now completes at ``N+2 ≤ N+3``, halving single-cycle FP combinational
+depth for ~273 flip-flops while keeping dependent ``FADD`` chains cycle-identical
+and independent ``FADD`` streams at 1-per-clock throughput (verified by
+``verif/fppipe/run-fp-pipe2-ab.sh`` and the 1M-vector
+``f_eval_s2 ∘ f_eval_s1 == f_eval`` equivalence check).
 
-Cycle-safety: verified, not asserted
-=====================================
+Shared pipelined x87 FPU (``fp_shared/``) in ``c0e3fe43``
+=========================================================
 
-The change is gated entirely under ``ifdef VEN_FP_PIPE2`` and the **default build
-is byte/cycle-identical**. The split itself is proven equivalent to the validated
-1-stage by ``make verify-fppipe2`` (``verif/fppipe/run-fp-pipe2-ab.sh``), which
-builds two cycle testbenches differing only by the flag and runs both on the FP
-cycle kernels:
+Earlier split transcendental leaf engines (``fpu_f2xm1``, ``fpu_fpatan``,
+``fpu_fyl2x``, ``fpu_fsincos``) duplicated wide multipliers and adders across
+four separate state machines. In the deployed ``VEN_FP_SHARED`` architecture
+(``fp_shared/``), ``ven_fp_top.sv`` unifies all x87 execution behind one
+architectural owner:
 
-* ``mb_faddchain`` (dependent FADD chain): the ``--cycle`` traces are
-  **byte-identical** — the 2-stage is cycle-for-cycle the 1-stage.
-* ``mb_fpindep`` (independent FADDs at throughput 1): **identical final
-  architectural state** (no stale read slipped through) and **+0.09 %** total
-  cycles from the one-clock-wider hazard — comfortably inside the M5 FP band.
-* Both meet the M5 FP CPI bands (``mb_faddchain`` ≈ 3.0, ``mb_fpindep`` below it);
-  ``make verify`` stays GREEN on the default build; the 1M-vector
-  ``f_eval_s2 ∘ f_eval_s1 == f_eval`` composition gate is bit-exact.
+* **ven_fp_fxch_queue.sv & ven_fp_state.sv:** Pointer-mapped 8×80-bit
+  register stack with a **zero-cycle FXCH rename queue**, overlapping ``FXCH``
+  and asynchronous FP execution with integer U+V retirement (critical for DOS
+  Quake's perspective-texture inner loops).
+* **ven_fp_alu.sv & ven_fp_widemul.sv:** Shared pipelined 80-bit
+  adder/subtractor and 38-DSP wide multiplier reused by both scalar ``FMUL`` and
+  the microcoded polynomial transcendental sequencer (``ven_fp_trans.sv`` /
+  ``ven_fp_estdiv.sv``), cutting FPU area by more than 2× compared with split
+  leaf engines.
+* **fpu_srt_div.sv & ven_bcd.sv:** Shared multi-cycle radix-4 SRT
+  divider/sqrt/``FPREM``/``FPREM1`` (with ``VEN_SRT_REM_OPERAND_SPLIT``) and
+  iterative ``FBSTP``/``FBLD`` converters.
 
-The Fmax result (K26 half-cache)
-================================
+Historical isolated OOC benchmark (pre-``fp_shared`` K26 study)
+===============================================================
 
-.. list-table::
+During early pre-``fp_shared`` bring-up, an isolated out-of-context (OOC) study
+on an XCK26 target (using the now-retired half-cache test harness, **never used
+in deployed builds**) quantified the standalone Fmax impact of adding
+``VEN_FP_PIPE2`` on the legacy ``fpu_top`` datapath:
+
+.. list-table:: Historical standalone OOC comparison (legacy ``fpu_top``, XCK26 OOC)
    :header-rows: 1
-   :widths: 30 18 18 14
+   :widths: 34 22 22 22
 
-   * - Metric (routed OOC, XCK26, 15 ns)
+   * - Metric
      - 1-stage ``VEN_FP_PIPE``
-     - ``+VEN_FP_PIPE2``
-     - Δ
-   * - Fmax — synthesis (WNS @ 15 ns)
+     - 2-stage ``+VEN_FP_PIPE2``
+     - Delta
+   * - Synthesis Fmax estimate
      - 59.4 MHz
      - **78.4 MHz**
      - +32 %
-   * - Fmax — routed (best directive)
+   * - Routed OOC Fmax
      - 52.6 MHz
      - **63.0 MHz**
      - +20 %
-   * - CLB LUTs (synth)
-     - 77,975
-     - 76,700
-     - −1.6 %
-   * - CLB Registers
-     - 25,565
-     - 25,838
-     - +273 FF
    * - Worst path
      - ``fpp → fx_round_pack → fpr``
-     - ``u_bcd`` (FBLD/FBSTP)
-     - cone gone
+     - ``u_bcd`` (iterative BCD)
+     - FP ALU off critical path
 
-Splitting the cone moves the FADD datapath off the critical path entirely
-(synthesis 59 → 78 MHz) and routes the half-cache build to **63.0 MHz** — clearing
-the 60 MHz target on the K26 — for the price of **one ``fx_pipe_t`` stage register**
-(~273 flip-flops), LUT-neutral. The worst path is now the rare iterative **BCD
-engine** (``ven_bcd``, the FBLD/FBSTP packed-decimal conversion), with the
-µop-cache fill-to-PC path just below it — both well above 60 MHz.
-
-A follow-up cycle-neutral fix takes the next worst path too: ``ven_bcd``'s per-clock
-step ran **two chained divide-by-10**; computing **one divide-by-100** and extracting
-the two low digits from ``q % 100`` (a 0..99 value) halves that cone, bit-exact
-(``make verify-bcd``). Synthesis rises to **80.6 MHz** and the routed half-cache build
-to **65.3 MHz** (``ExtraNetDelay_high`` placement). The remaining wall is the
-**route-bound µop-cache fill → front-end cluster** (``store_bmap → eip``/``ic_age``),
-which is placement-variable — the diffuse front-end congestion that in-context
-floorplanning, not a single-cone fix, addresses.
-
-See :doc:`/microarch/l1-parametric` for the fixed P5 cache geometry, and
-``docs/fpga-synthesis.md`` for the archived place-and-route sweep, device views,
-and reproduction commands.
+In the full deployed ``c0e3fe43`` SoC on **RK-XCZU15EG-F** (with **full 8 KiB
+P5 L1 caches**, ``fp_shared/``, and ``retime_muxf_route_first``), the x87 FPU is
+no longer the chip's setup bottleneck — the worst full-chip path lies in the
+integer fetch-to-L1D hit-return cone (``24.522 ns`` at ``25.000 ns`` constraint,
+``+0.164 ns`` positive slack). See :doc:`/microarch/l1-parametric` and
+:doc:`/microarch/srt-divider`.

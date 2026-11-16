@@ -1,12 +1,12 @@
-# M2S — system mode (scoping plan; NOT yet started)
+# M2S — System-Mode Architecture Spec (M2S.0–M2S.6)
 
-This is a **scoped de-risk plan**, not an implementation. M2S is the one
-substantial piece of REF.md §9 left after the M0–M6 + M5B + R1 roadmap completed:
-the **system/privileged processor** — protected-mode segmentation, paging + TLBs +
+> **Current Status (Nov 2026 — COMPLETED & BOARD-QUALIFIED):** All seven M2S stages (`M2S.0` system oracle + `M2S.1` real/PM segmentation + `M2S.2` 2-level paging & TLBs + `M2S.3` IDT fault/interrupt delivery + `M2S.4` 32-bit TSS/cross-privilege/gates + `M2S.5` SMM/`RSM` + `M2S.6` `DR0`–`DR7`/`#DB`, plus `M7.2` V86 mode and `VEN_SYS_FASTPATH*` protected-mode U+V fast paths) are **implemented**, gated in `make verify-sys`, and physically qualified booting **cold Windows 95 OSR2 GUI** and **cold DOS Quake `demo1`** on **RK-XCZU15EG-F** image **`c0e3fe43`** (`40.264133 MHz` STA sign-off, `0.515778001` total U+V gameplay IPC across cycles `28,696,827,616–32,989,404,795`). The original scoping notes below record how the `qemu-system-i386` differential harness was structured.
+
+## Historical Scoping Notes (M2S.0–M2S.6 Roadmap)
+
+M2S added the **system/privileged processor** — protected-mode segmentation, paging + TLBs +
 MMU, the interrupt/exception pipeline, TSS/task-switch, SMM/`RSM`, and debug
-registers. Everything to date is **user-mode, flat** (segments constant, no
-paging, `int 0x80` = halt), so M2S is effectively a **second project** of size
-comparable to the whole M1–M5 ladder. Greenlight + staging is a user decision.
+registers — atop the earlier user-mode flat M1–M5 core.
 
 ## Oracle — FEASIBLE (surveyed)
 

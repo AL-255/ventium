@@ -32,7 +32,7 @@ alter flags, or change the separate V-branch redirect expression. In particular,
 that redirect retains its intermediate U-width wrap; do not replace it with the
 unconditional paired sum without proving mixed-width semantics.
 
-See [the FPGA localization report](../../docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md)
-for mapped leaf counts, hardware-profile integration results and remaining
-acceptance requirements. Area improvements in a separately synthesized leaf
-are not whole-core area, clock-frequency or gameplay-IPC results.
+See [the FPGA synthesis & APR guide](../../docs/fpga-synthesis.md)
+for hardware-profile integration results and acceptance requirements. Area
+improvements in a separately synthesized leaf are not whole-core area,
+clock-frequency or gameplay-IPC results.

@@ -1,624 +1,132 @@
-# Hosted PS/2 device transport — October 10, 2026
+# Hosted PS/2 Keyboard & Mouse Subsystem (`fpga/` & `fpga/board-tools/`)
 
-**October 16 integration correction:** the original mouse overlay placed its
-instances inside the non-posted DDR branch. The posted FPGA synthesis omitted
-them and its independent audit rejected the result. Do not deploy or qualify
-that export. `repair_posted_mouse_wrapper.py` creates a separate corrected
-export; the real-wrapper AXI-Lite microgate now catches the old posted failure
-and passes the corrected posted/non-posted cases at both tested clocks.
-Complete-wrapper synthesis and physical UI qualification are still pending.
-See the [native failure, exact fix and retained evidence](../verif/issue_uv/V_RESULT_CARRY.md#october-16-synthesis-closed-mouse-wrapper-integration-rejected-and-repaired).
-The historical peripheral results below do not prove wrapper integration.
+## Qualification Status (`c0e3fe43`, 2026-11-14)
 
-Status: **native-tested combined adapter/peripheral path and a separate complete source export**,
-not a board-accessible mouse or an FPGA acceptance pass. The active timing
-candidate is unchanged. Its frozen wrapper still ties the mouse inputs high;
-the separate mouse export below adds a loss-detectable register interface and wiring.
+On **RK-XCZU15EG-F** (`xczu15eg-ffvb1156-2-i`), board-qualified release image
+**`c0e3fe43`** (`161` defines, `VEN_DDR_POSTED`, `VEN_KBC_FAST`,
+`VEN_KBD_AUTOACK`, `cycle_mode = 1'b1`) integrates both the **inhibit-safe PS/2
+keyboard injector** (`ven_ps2_kbd_inject.v`) and the **bidirectional PS/2 mouse
+serial endpoint + CSR mailbox** (`ven_ps2_device.sv`, `ven_ps2_mailbox.sv`)
+inside the posted-DDR4 SoC wrapper.
 
-Latest verified gameplay is **0.51030715 U+V retirement-event IPC** on simulated
-`2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, the first predeclared window,
-not a full-demo average. Newer timing candidates are gameplay-unmeasured. This
-peripheral work claims **no IPC gain** and does not waive the canonical gate.
+- **Physical Windows 95 OSR2 GUI Qualification:** Cold-booted to desktop at
+  both **`40.000 MHz`** (STA-signed-off at `40.264133 MHz`) and **`58.824 MHz`**
+  (`N = 17` runtime DRP overclock), exercising live PS/2 mouse cursor/button
+  movement and PS/2 keyboard typing across **Calculator (`355/113`)**,
+  **Notepad**, and **MS Paint**, followed by clean Start-menu OS shutdown
+  (`docs/win95-desktop-c0e3fe43.png`).
+- **Verified Physical Gameplay IPC Baseline:** **`0.515778001` total U+V IPC**
+  (`0.397847833` primary/U-only, counters include `REP`-element retirement) on
+  image **`c0e3fe43`** across DOS Quake `demo1` gameplay cycles
+  **`28,696,827,616–32,989,404,795`**. PS/2 peripheral and host-service tests
+  claim zero IPC gain and never substitute for full-core differential or
+  standard-suite gates.
 
-## Why a bidirectional endpoint is needed
+---
 
-The keyboard-only injector cannot receive device commands. Connecting another
-transmit-only instance to the mouse pins would therefore not supply a usable
-mouse: the 8042 sends initialization/identification commands and needs the
-device to supply the host-to-device clock and ACK bit before replies can arrive.
-The simulation mouse is an external device model, not synthesized hardware.
+## 1. Architectural Overview: Keyboard Injector vs. Mouse Endpoint
 
-`ven_ps2_device.sv` implements only the byte transport. It connects through
-ordinary wired-AND PS/2 clock/data levels to the existing controller. There is
-no path into guest RAM, the controller FIFO, IRQ state or CPU registers.
+Both endpoints drive the unmodified MiSTer `ao486` 8042 PS/2 controller
+(`ps2.v` + 64-entry FIFO) over real wired-AND serial `ps2_clk` / `ps2_dat` pins
+in the 8042's guest-reset domain — never writing guest RAM, controller FIFOs,
+or PIC/IRQ state directly:
 
-- One outgoing byte is owned after `tx_valid && tx_ready`. `tx_done` reports
-  a complete frame; `tx_aborted` separately reports host preemption. An aborted
-  byte is not silently resumed as a suffix or counted as delivered.
-- One received byte, odd-parity/stop error flags and `rx_valid` remain stable
-  until `rx_ready`. A second host request waits for space before clocking/ACK.
-- Input framing errors are delivered as error metadata after the serial ACK;
-  the device-policy layer must request retransmission, not execute bad commands.
-- Clock high/low phases are 40 microseconds at the tested 3.125/40 MHz clocks;
-  outgoing frames require 100 microseconds of continuous idle first. Integer
-  ceiling division applies at other supported clocks. Out-of-range clock
-  parameters are rejected. Host/controller outputs must be synchronous to `clk`.
-- Reset discards transport ownership and releases both device lines. The
-  integration must use the same guest reset domain as the 8042.
+1. **PS/2 Keyboard Injector (`ven_ps2_kbd_inject.v`, CSRs `0x380..0x3A0`):**
+   - **Transmit-only** endpoint paired with `VEN_KBD_AUTOACK` for
+     host-to-keyboard commands.
+   - **Host Clock-Inhibit & Backpressure Safety:** During `SEND`, if the 8042
+     pulls `ps2_clk` low (for example during `0xAA` controller self-test or
+     64-entry FIFO full backpressure) *before* a completed stop-low phase, the
+     transmitter retains ownership of the in-flight scan byte, keeps
+     `inject_ready = 0` (`busy = 1`), releases wired-AND lines, waits for a
+     fresh `100 us` continuous bus-idle window, and replays the **entire 11-bit
+     frame** rather than dropping the byte or emitting a truncated suffix. Once
+     stop-low has completed for a full synchronous clock, the frame retires
+     without duplicate replay. Shared guest reset discards any held scan byte.
+   - **Management CSRs (`ven_mgmt_axil`):** `0x380` write submits a scan byte;
+     `0x390` reads `ready`/`busy`; `0x3A0` reads keyboard injector capability.
 
-## Directed verification
+2. **Bidirectional PS/2 Mouse Endpoint (`ven_ps2_device.sv` + `ven_ps2_mailbox.sv`):**
+   - Windows 95 and DOS mouse drivers issue 8042 `0xD4` auxiliary commands
+     (`0xFF` reset, `0xF2` ID, `0xF3` sample rate, `0xE8` resolution, `0xF4`
+     enable stream reporting) that require device-generated `12.5 kHz` serial
+     clocking, host-to-device bit sampling, framing ACK, and `IRQ12` replies.
+   - **`ven_ps2_device.sv` (Byte Wire Transport):** Generates `40 us` high/low
+     clock phases (`12.5 kHz`) after `100 us` continuous idle, captures
+     host-inhibited commands with odd-parity/stop validation, and distinguishes
+     completed device frames (`tx_done`) from host-preempted frames
+     (`tx_aborted`) without silently resuming partial bytes.
+   - **`ven_ps2_mailbox.sv` (Single-Writer CSR Boundary):** Exposes
+     sequence-numbered TX admission/completion and RX byte/error handshakes on
+     `0x10`-aligned 32-bit registers (`WSTRB = 4'b1111` required):
 
-`tb_ps2_device.sv` uses the **actual frozen FPGA 8042 and FIFO**, normal
-port-64h/60h requests, physical serial levels, AUX status and IRQ12. It does not
-force controller state. Its independent pin oracle checks framing, odd parity,
-every transmitted bit and the 12.5 kHz wire clock.
+| Offset | Read | Write | Semantics |
+| --- | --- | --- | --- |
+| `0x400` | `0x50533201` | Rejected | Mouse mailbox capability (`"PS2\x01"`) |
+| `0x410` | Status word | Rejected | Ready, retained TX done/abort, RX valid, armed, protocol/RX-abort error flags |
+| `0x420` | Reset generation | Rejected | Saturating counter incremented on each guest-reset assertion |
+| `0x430` | `0` | Arm generation | Arms submission only when written value equals live `0x420` generation |
+| `0x440` | `0` | Submit TX byte | `[7:0]` byte (`[31:8] == 0`); advances TX admission sequence; aborted if RX preempts |
+| `0x450` | TX sequence | Rejected | Monotonic saturating TX admission sequence |
+| `0x460` | `0` | Ack TX event | Clears retained TX delivery/abort event matching exact sequence |
+| `0x470` | RX payload | Rejected | Received host byte plus parity/stop error flags (stable until `0x490` ack) |
+| `0x480` | RX sequence | Rejected | Monotonic saturating RX event sequence |
+| `0x490` | `0` | Ack RX event | Releases RX mailbox for next host command matching exact sequence |
+| `0x4A0` | `0` | W1C errors | Clears sticky RX-abort / protocol-error status indicators |
 
-The native two-frequency test passes **49 directed checks per frequency**,
-including host command/reply traffic, byte transparency, IRQ consumption,
-full receive-mailbox backpressure, bad parity/stop bits, pending and active
-transmit preemption, truncated host receive/recovery, and queued/active-frame
-reset. Each frequency completes 26 outgoing frames and reports two explicit
-preemption events. Neither interrupt observation nor these tests proves a
-Windows mouse driver can initialize or use the eventual device.
+---
 
-The first retained run failed an incorrect test assumption: this controller
-retains IBF until both serial send completion **and an output reply**. The test
-now checks IBF after a real reply has traversed the wire/FIFO/IRQ path. The
-controller and transport were not changed to bypass that failure.
+## 2. Board Software Stack (`fpga/board-tools/`)
 
-Reproduce with the explicit frozen platform's `rtl/` directory. The bounded
-runner snapshots all four source files, records hashes and native exits, and
-also requires rejection of an even-parity DUT mutation and four invalid-clock
-configurations. Use a fresh retained service name on subsequent runs:
+- **`ven_ps2_mouse.py`:** Pure-Python standard 3-button PS/2 mouse (`ID = 0x00`)
+  policy implementing `0xFF` reset (`BAT 0xAA` + `0x00`), defaults, sample rate,
+  resolution, stream/remote/wrap modes, status (`0xE9`), scaling, and
+  whole-packet resend (`0xFE`). Splits large `(dx, dy)` deltas across legal
+  signed packets, restarts interrupted 3-byte movement packets from their
+  header on `tx_aborted`, and raises explicit backlog errors rather than
+  silently dropping motion.
+- **`ven_ps2_mailbox_host.py`:** Connects `ven_ps2_mouse.py` to ordered 32-bit
+  CSR callbacks. Verifies `0x50533201` capability, attaches while guest reset is
+  held, issues at most one store per poll, confirms TX admission via `0x450`
+  sequence advancement, resolves retained TX events before consuming RX, and
+  invalidates stale state across guest-reset generations.
+- **`ven_ps2_mmio.c` & `ven_ps2_mmio.py` (`libven_ps2_mmio.so`):** Little-endian
+  AArch64 `/dev/mem` backend mapping the non-RAM management aperture at
+  `0xA000_0000` with aligned volatile 32-bit accesses, `dsb sy` barriers,
+  same-peripheral post-store status readback, and an exclusive non-blocking lock
+  at `/run/lock/ventium-ps2-mouse.lock` (rejects symlinks, hardlinks, forks, and
+  cross-thread sharing). Build on the board or cross-compile with:
+  ```sh
+  aarch64-linux-gnu-gcc -std=c11 -Wall -Wextra -Werror -O2 -fPIC -shared \
+    fpga/board-tools/ven_ps2_mmio.c -o /home/yukidama/external/tmp/libven_ps2_mmio.so
+  ```
+- **`ven_ps2_service.py`:** Long-lived board daemon (`SOCK_SEQPACKET` at
+  `/run/ventium-ps2-mouse.sock`, mode `0600`, max 4 same-UID clients) plus
+  `status` and `input` CLI subcommands. Attach while guest reset is held before
+  `ven_board_probe.py run` releases the core. Keep button presses held across at
+  least one delivered sample before sending button release so rapid clicks do
+  not collapse between stream intervals.
 
-```sh
-systemd-run --user --unit=ventium-ps2-device-check --remain-after-exit \
-  --property=MemoryMax=512M --property=MemorySwapMax=0 \
-  --property=TasksMax=16 --property=CPUQuota=100% --property=RuntimeMaxSec=210 \
-  --setenv=TMPDIR=/home/yukidama/external/tmp \
-  /usr/bin/taskset -c 12 /usr/bin/python3 -B \
-  /home/yukidama/github/ventium/fpga/run-ps2-device-gate.py \
-  --platform-root /home/yukidama/external/tmp/ventium-zero-c1-fpga40.rQeGd6ln/ventium/3rd-party/ao486_MiSTer/rtl
-```
+---
 
-No Vivado, full-core rebuild, long guest or board mutation is launched. The
-source-controlled runner prints its fresh evidence directory in the journal.
+## 3. Directed Simulation & Host Regressions
 
-Retained native transport evidence under `external/tmp/`:
-
-- `ventium-ps2-device.sczpOaeg`: first failed test, native exit 1; original
-  source copies retained alongside the failure.
-- `ventium-ps2-device-r2.oas7wFZB`: corrected initial 90-check suite, native 0.
-- `ventium-ps2-device-r3.b7jKP460`: expanded 98-check suite, native 0 in
-  37.51 seconds, 14,233,600-byte scope peak, no OOM and stable input pins.
-- `ventium-ps2-device-gate.mwnatltt`: source-controlled runner passes the same
-  98 checks (37.31 seconds), rejects the even-parity mutation at the actual
-  serial-bit comparison, and rejects all four invalid clock configurations.
-  Scope peak is 17,420,288 bytes with zero OOM events; invocation
-  `a8a77e8b9b8f4c26b9600623c0c78c96`, native supervisor exit 0. This uses DUT
-  SHA-256 `8db5ceb38d329590e293e49ef67e4f347fe93fde5877d233f877b661de7fde48`.
-
-## Hosted mouse policy and end-to-end wire check
-
-`board-tools/ven_ps2_mouse.py` supplies a general three-button ID-00 device;
-it has no MMIO, IRQ, framebuffer or guest-memory access. Commands cover reset,
-defaults, ID, sample rate, resolution, stream/remote/wrap, status, scaling,
-reporting control, polling and packet resend. Framing errors request a retry
-without executing the received byte. Status button order is deliberately
-different from movement-packet button order. Wrap echoes bytes without
-executing them, except reset/exit-wrap. Extended wheel identification is not
-advertised. The command contract was checked against the
-[Cypress/Infineon PS2D datasheet, mouse command table](https://www.infineon.com/dgdl/Infineon-PS2D_001-13681-Software%2BModule%2BDatasheets-v01_02-EN.pdf?fileId=8ac78c8c7d0d8da4017d0fab8b401c89).
-
-Policy API and integration obligations:
-
-- `reset()` must accompany a real transport/8042 reset, not merely restarting
-  the Python process against an unknown live guest. It invalidates old tokens
-  and queues normal BAT/ID bytes. Protocol `FF` separately responds with ACK.
-- `input(dx, dy, buttons)` accepts sensor counts at the selected resolution,
-  positive X right/Y up, buttons left/right/middle = 1/2/4. The caller converts
-  physical units if necessary. A bounded backlog raises an explicit exception
-  instead of dropping input. Large movement is split across valid packets;
-  this hosted sensor does not emulate physical-counter overflow or a wheel.
-- `advance(now_ns)` uses monotonically increasing device time, schedules only
-  changed stream samples, respects sample rate and never queues a catch-up
-  burst. Disabled stream reporting still permits explicit remote reads.
-- `peek()` offers a byte. `admitted()` is called only after hardware confirms
-  ownership; `completed(token, delivered=...)` must distinguish delivery from
-  abort. An interrupted packet restarts at its header. Only the final delivered
-  byte consumes movement; input arriving during transmission remains pending.
-- The adapter must resolve earlier TX events before calling `receive()` and
-  service RX before scheduling new motion. Late/duplicate completion and RX
-  while a byte is owned raise errors. New commands replace an unsent response
-  suffix. Resend remembers a packet with a delivered prefix, not merely queued
-  data, and does not consume its movement again after successful delivery.
-
-`test_ven_ps2_mouse.py` covers command/default state, framing/parameter errors,
-all wrap echo bytes, all button combinations and signed motion boundaries,
-stream timing, scaling, remote polling, whole-packet resend, each packet-byte
-abort, reset/stale ownership and explicit backlog failure. These tests alone
-would not prove a working 8042 path.
-
-`tb_ps2_mouse_policy.sv` and `run-ps2-mouse-policy-gate.py` therefore connect the
-**actual frozen 8042/FIFO** and `ven_ps2_device` to the frozen Python policy.
-Commands enter through ports 64h/60h; the policy consumes bytes actually
-received from the serial pins. Replies return through framing/parity checks,
-AUX/OBF/IBF status, IRQ12 and port 60h, and are compared with independent literal
-packet expectations. No internal controller state is forced. The first run
-passed 19 host commands and 46 delivered bytes at each of 3.125/40 MHz, native
-zero in 5.81/44.14 seconds, with 22,605,824-byte scope peak and zero OOM events.
-It is retained as `external/tmp/ventium-ps2-mouse-policy.p9twben1`.
-
-Reproduce in a fresh service with the transport gate's resource properties,
-but `RuntimeMaxSec=300`, invoking `fpga/run-ps2-mouse-policy-gate.py` with the
-same explicit `--platform-root`. The runner snapshots its sources and tools,
-records native status/logs, and rejects byte-only-resend, double-consumption
-and inverted-Y-sign mutations through the protocol tests. It does not exercise
-a PS-side CSR adapter, operating-system driver or physical FPGA.
-
-Final source-controlled closure (21:26 UTC):
-`external/tmp/ventium-ps2-mouse-policy.vuru25_e`, invocation
-`44801bad210c469580053b131032fed2`. All **14 protocol tests** pass; all three
-deliberately broken policies fail assertions, not imports/builds. The real-wire
-cases repeat the 19 commands / 46 bytes at each frequency, native zero in
-5.82 / 45.07 seconds. Actual simulator affinity is CPU 12, both child processes
-are reaped, scope peak is 22,175,744 bytes and OOM counts are zero. An independent
-closure check rehashed all **23 source/tool/mutation pins**, counted actual
-RX/TX log records and verified the exited service identity. Closure SHA-256:
-`f7e47110eddac66fb554f6458cc77db158787ed8bc9d69b986141adc9ac5fd0d`.
-
-Two additional review fixes are included: physical button releases remain
-observable after leaving wrap mode, and backlog admission reserves space for
-the eventual commit of an opposite-direction in-flight motion sample. Directed
-tests cover both. Neither fix changes the processor or claims a gameplay gain.
-
-## October 11: retained mailbox and wrapper overlay
-
-[`ven_ps2_mailbox.sv`](ven_ps2_mailbox.sv) adds a single-writer CSR boundary.
-An offered byte remains owned under transport backpressure. Admission advances
-a sequence number; successful delivery and host-preemption produce distinct,
-retained events, cleared only by an acknowledgement of that exact sequence.
-Receiving a host command before a queued TX reaches the wire explicitly aborts
-that TX, so the policy can resolve it before consuming RX. The RX byte, framing
-errors and sequence remain stable until their separate exact acknowledgement.
-
-The management domain records each guest-reset assertion once and disarms
-submission. Software must observe the new generation and explicitly arm it;
-pending bytes cannot leak into the next guest. Counters saturate rather than
-wrap. Sequence exhaustion requires guest reset; generation exhaustion requires
-management/fabric reset. The physical transport still uses the actual 8042
-guest-reset domain. This is not support for independent concurrent writers or
-reattaching a fresh policy process to an unknown live device.
-
-The source overlay uses only 0x10-aligned lane-0 offsets:
-
-| Offset | Read | Write |
-|---|---|---|
-| `0x400` | Capability `50533201` | Rejected |
-| `0x410` | Status; exact bits documented in the module | Rejected |
-| `0x420` | Guest-reset generation | Rejected |
-| `0x430` | Zero | Arm the exact observed generation |
-| `0x440` | Zero | Submit byte; upper 24 bits must be zero |
-| `0x450` | TX admission sequence | Rejected |
-| `0x460` | Zero | Acknowledge retained TX event by sequence |
-| `0x470` | RX byte plus parity/stop errors | Rejected |
-| `0x480` | RX sequence | Rejected |
-| `0x490` | Zero | Acknowledge RX by sequence |
-| `0x4A0` | Zero | W1C RX-abort/protocol-error indicators |
-
-All writes require all four byte strobes. Invalid/stale writes are visible
-through the protocol-error status, not silent admission. A ready read is only
-advisory: the PS adapter must verify actual sequence advancement before calling
-`Mouse.admitted()`. It must service completion before RX, recheck generation
-around observations and reject an old image without the exact capability.
-Neither a CSR read nor an AXI response acknowledges a byte's serial delivery.
-
-[`prepare_ps2_mouse_mailbox.py`](prepare_ps2_mouse_mailbox.py) checks the three
-exact current wrapper/management/project input hashes, refuses missing,
-duplicate or already-applied anchors, and writes a separate five-file overlay.
-It forwards actual AXI byte strobes and one registered command pulse, preserves
-the existing AXI response retention, connects the wired-AND mouse pins, and
-passes the wrapper's `CLK_HZ` into the byte transport. It changes no processor
-RTL, feature defines or clock constraints. It is **not a complete independent
-build directory**: a later source-matched export must deliberately incorporate
-it through the existing clock/profile wrapper, never run the legacy base Tcl
-alone or edit the live export.
-
-Native closure: `external/tmp/ventium-ps2-mailbox-r2.rDP90LzX`, service
-`ventium-ps2-mailbox-r2-oct11.service`, invocation
-`57153f0ed3a841a79899cd2c4f868ba5`, native exit 0, 29,401,088-byte memory peak,
-zero OOM events and unchanged source/tool pins. The runner
-[`run-ps2-mailbox-gate.py`](run-ps2-mailbox-gate.py) records:
-
-- **1,969 directed mailbox checks**, including all byte values, busy writes,
-  partial strobes, retained/error events, stale acknowledgements, host-command
-  preemption, reset at each ownership stage, and natural counter saturation
-  with a narrowed test instance. No private state is forced.
-- **233 actual `ven_mgmt_axil` integration checks** with separated AW/W arrivals,
-  B/R backpressure, byte-strobe propagation, address-bank isolation and actual
-  control/forensic guest resets. The serial side here is an explicit BFM.
-- The existing debug-register regression and both modules' six-class structural
-  lint pass; twelve recipe checks pass. Six broken mailbox variants and three
-  broken register bridges fail native assertions; two invalid counter widths
-  fail elaborated parameter guards. Compile failures/timeouts are not counted
-  as successful mutation detection.
-
-The prepared overlay is `external/tmp/ventium-ps2-mouse-overlay-r2.McPNAkCQ`.
-The initial mailbox-only run and first prepared overlay remain separate
-historical evidence. Reproduce using a fresh empty external output, the bounded
-one-CPU/512-MiB/no-swap service profile above, and the runner's `--overlay` option.
-No Vivado, full guest, board write or additional heavy build is launched.
-
-The protocol runner's new `--mailbox` mode then passes the **actual 8042/FIFO +
-serial transport + mailbox + unchanged Python mouse policy** path at both
-3.125 and 40 MHz: **19 host commands / 46 delivered bytes per clock**. Every
-outgoing byte crosses independently checked serial framing/parity, AUX status,
-IRQ12 and port 60h. CSR admission sequences and retained completion records
-are checked before acknowledgement. The existing direct-transport mode is
-rerun as a separate control and also passes. Each run retains the 14 policy
-tests and three deliberate policy-mutation failures. These tests still do not
-execute a PS MMIO service or Windows driver.
-
-Both services close with native exit 0, reaped children and zero OOM events:
-
-| Mode | Evidence leaf under `external/tmp` | Native seconds, 3.125 / 40 MHz | Peak bytes |
-|---|---|---|---|
-| Mailbox wire path | `ventium-ps2-mouse-policy.twwpiusp` | 12.69 / 93.13 | 26,210,304 |
-| Direct control | `ventium-ps2-mouse-policy.1s56t25o` | 12.22 / 92.70 | 21,815,296 |
-
-Invocations are `e82a954c9cca4a32964164c3bd28b8fc` and
-`15c48e993f454492b2a35e2c730745ac`, respectively; actual child affinity is CPU
-12 / 13. An independent closure audit rechecks supervisor identities, absent
-native processes, every recorded RX/TX line and all 35 / 25 / 23 pins across
-the mailbox/AXI gate and two wire runs. Its receipt is
-`ventium-ps2-mailbox-r2.rDP90LzX/audit.json`, SHA-256
-`3d7e60fdf663fc42b40e1d5434c105bebfe7a302b2a4b2ecf6f3232b2f0dd3f6`.
-
-## October 12: software owner and native CSR test
-
-[`ven_ps2_mailbox_host.py`](board-tools/ven_ps2_mailbox_host.py) now connects the
-mouse policy to ordered register callbacks. It checks the exact capability and
-requires a clean, held guest reset when first attaching. Each poll uses bounded
-generation/status-checked reads and performs at most one store. Delayed command
-confirmation never causes a speculative repeat store; TX sequence advancement
-admits a byte, and acknowledgement of a retained delivery/abort event resolves
-it before RX is consumed. Reset invalidates old policy ownership. Unexplained
-errors or ambiguous I/O failures poison the adapter rather than silently retrying.
-It does not open `/dev/mem`, reset the guest or permit a fresh policy to attach
-to an already running device.
-
-All **25 software-adapter tests** pass, covering delayed writes, immediately
-completed TX, back-to-back RX, retained-data corruption, read-boundary resets,
-stale acknowledgements, deadlines, sequence exhaustion and foreign ownership.
-These tests use an independent transaction-level register model.
-
-[`run-ps2-mailbox-host-gate.py`](run-ps2-mailbox-host-gate.py) separately runs the
-actual adapter and policy against the actual mailbox RTL through
-[`tb_ps2_mailbox_host.sv`](tb_ps2_mailbox_host.sv). **722 register transactions**
-pass, including BAT/ID, reporting enable, signed motion and packet resend,
-RX preemption of queued TX, READY-to-store rejection, stale-event acknowledgement
-across reset, and RX-abort acknowledgement. The serial side is explicitly a
-BFM: this test does **not** include the 8042, wire framing, AXI bridge, native
-MMIO, Windows or the board. The earlier wire and AXI tests remain separate
-evidence, not an end-to-end service qualification.
-
-Retained run: `external/tmp/ventium-ps2-mailbox-host.IQ4KEutH`, service
-`ventium-ps2-mailbox-host-oct12`, invocation
-`86102e3b40484831b57cfced148f408d`. Native exit is zero, the child is reaped,
-actual affinity is CPU 12, and the service peak is 14,262,272 bytes under a
-128-MiB/no-swap limit. Source/tool pins remain unchanged. No active FPGA source
-or timing input is modified. Reproduce using a fresh empty external directory:
+All PS/2 RTL and host-stack gates run without Vivado using fresh scratch
+directories under `/home/yukidama/external/tmp`:
 
 ```sh
-systemd-run --user --unit=ventium-ps2-mailbox-host-check --remain-after-exit \
-  --property=MemoryMax=128M --property=MemorySwapMax=0 \
-  --property=TasksMax=16 --property=CPUQuota=100% --property=RuntimeMaxSec=120 \
-  --setenv=TMPDIR=/home/yukidama/external/tmp --setenv=PYTHONDONTWRITEBYTECODE=1 \
-  /usr/bin/taskset -c 12 /usr/bin/python3 -B \
-  /home/yukidama/github/ventium/fpga/run-ps2-mailbox-host-gate.py \
-  --out /home/yukidama/external/tmp/FRESH_EMPTY_DIRECTORY
+export TMPDIR=/home/yukidama/external/tmp
+export PYTHONDONTWRITEBYTECODE=1
+
+# Software unit suite (mouse policy, mailbox host adapter, MMIO fixture, socket service):
+python3 -B fpga/run-ps2-mmio-gate.py --out "$TMPDIR/ps2-mmio-check"
+
+# Bidirectional serial transport, mailbox CSRs, and full 8042 + adapter wire path:
+python3 -B fpga/run-ps2-device-gate.py --platform-root 3rd-party/ao486_MiSTer/rtl
+python3 -B fpga/run-ps2-mouse-policy-gate.py --platform-root 3rd-party/ao486_MiSTer/rtl --mailbox
+python3 -B fpga/run-ps2-mailbox-gate.py --out "$TMPDIR/ps2-mailbox-check"
+python3 -B fpga/run-ps2-mailbox-host-gate.py --out "$TMPDIR/ps2-mailbox-host-check"
+
+# Keyboard injector inhibit, 8042 AA self-test, 64-entry FIFO backpressure & MMIO gates:
+python3 -B -m unittest discover -s fpga -p 'test_kbd_*.py' -v
 ```
-
-### Native MMIO backend (prepared, not deployed)
-
-[`ven_ps2_mmio.c`](board-tools/ven_ps2_mmio.c) and its
-[Python wrapper](board-tools/ven_ps2_mmio.py) provide the adapter's ordered
-callbacks. The production build is little-endian AArch64 only. It opens the
-fixed `/dev/mem` management page at `0xA0000000`, reads the exact mouse
-capability, and exposes only the six readable and five writable mouse CSR
-indices. Each MMIO access is one aligned volatile 32-bit load/store with
-`dsb sy` barriers. A store is followed by a status read from the same peripheral;
-that read does not replace the adapter's admission/delivery confirmation.
-No function writes guest reset, clock, RAM, IRQ or execution control.
-
-The backend retains a nonblocking advisory lock at
-`/run/lock/ventium-ps2-mouse.lock` until close. All mouse writers must honor it;
-it cannot exclude unrelated privileged tools that ignore this contract.
-The lock file must not be unlinked/replaced. Symlink/hardlink lock files are
-rejected; forked processes and foreign Python threads cannot operate the
-handle. Closing a forked child descriptor cannot explicitly unlock the parent.
-Fabric replacement while the handle is live remains forbidden.
-
-The mapping precondition is important: the register aperture must be a
-**non-RAM device region**, not ordinary RAM. Linux arm64's
-[`phys_mem_access_prot`](https://github.com/torvalds/linux/blob/v6.6/arch/arm64/mm/mmu.c#L87)
-distinguishes these cases; `O_SYNC` alone is not a portable device-memory-type
-guarantee. The deployed kernel/aperture still need checking before physical use.
-The [arm64 I/O primitives](https://github.com/torvalds/linux/blob/v6.6/arch/arm64/include/asm/io.h)
-also distinguish raw accesses and ordering. This userspace helper is not a
-claim of kernel-driver equivalence or measured AXI timing.
-
-[`run-ps2-mmio-gate.py`](run-ps2-mmio-gate.py) passes **13 tests** using an
-explicit regular-file fixture library. They check exact lanes, untouched
-adjacent registers, value/index rejection before access, exclusive ownership,
-fork/close behavior, capability failure cleanup, unsafe path rejection, and
-Python integer/thread/lifetime checks. A fixture library cannot open physical
-MMIO and is rejected by the production Python wrapper. The real AArch64 library
-cross-compiles with `-Wall -Wextra -Werror`; its disassembly shows the 32-bit
-load/store, barriers and status readback. It does not export the fixture opener.
-An x86 production build is deliberately rejected. None of these checks executes
-the ARM instructions on a device or qualifies physical ordering.
-
-Evidence: `external/tmp/ventium-ps2-mmio-r2.NFgjdW9Q`, service
-`ventium-ps2-mmio-r2-oct12`, invocation `cdd9eecabd8f4c6ba3b7510ef4891cd0`,
-native exit zero, CPU 12, peak 26,988,544 bytes; source/tool pins unchanged.
-The first run, `ventium-ps2-mmio.UxuW6vYv`, failed during Python import because
-`ven_ps2_mmio.so` shadowed `ven_ps2_mmio.py`. Renaming the library to
-`libven_ps2_mmio.so` fixes the actual packaging problem; the failed run remains
-separate evidence. The corrected library's SHA-256 is
-`f78ff8f91bddae6137caa30e9d22189bd731bf6bf0384899a78a2586920d2c18`.
-
-Reproduce in the same bounded service profile as the adapter gate, replacing
-the command with `fpga/run-ps2-mmio-gate.py --out FRESH_EMPTY_EXTERNAL_DIRECTORY`.
-Build the deployable library on AArch64, or with the matching cross compiler:
-
-```sh
-aarch64-linux-gnu-gcc -std=c11 -Wall -Wextra -Werror -O2 -fPIC -shared \
-  fpga/board-tools/ven_ps2_mmio.c -o "$TMPDIR/libven_ps2_mmio.so"
-```
-
-Install it beside the Python module. Use `with MMIO() as io:` around
-`Adapter(io.read32, io.write32)` while actual guest reset is held. This fragment
-is not a standalone boot/deployment recipe.
-
-### Prepared Linux service and input client
-
-[`ven_ps2_service.py`](board-tools/ven_ps2_service.py) supplies the long-lived
-owner plus `status` and `input` clients. It attaches while guest reset is held;
-the **ordinary cold launcher** subsequently releases reset. The service polls
-the real adapter and accepts bounded sensor requests through a local
-`SOCK_SEQPACKET` socket, default `/run/ventium-ps2-mouse.sock`, mode 0600 and
-same-UID peers only. At most four clients are retained, requests are limited to
-512 bytes, and idle clients expire. Slow clients do not block device polling.
-No guest recognition, cursor-memory write, synthetic interrupt or CPU stepping
-is present. Termination releases software resources without resetting the
-guest; restarting still requires a real, deliberate cold reset.
-
-The input command uses signed sensor counts and button levels, not queued UI
-clicks. A successful response means **queued input, not serial/guest delivery**.
-Status is not a delivery fence. Keep a press held until its packet is delivered
-and visually confirm the result before sending release; rapid press/release
-updates can collapse between sensor samples. A lost client response is an
-ambiguous outcome, so do not blindly retry relative movement. These limitations
-must be handled by the eventual board UI acceptance procedure.
-
-The service refuses an existing socket instead of deleting a possible live
-owner. Cleanup removes only its own socket inode and preserves a replacement.
-Protocol/backend failures stop the owner for diagnosis; neither exhaustion nor
-I/O failure triggers an automatic guest reset.
-
-Nine tests cover real local-socket exchanges, oversized/invalid requests,
-bounded idle clients, existing-owner refusal, cleanup replacement races and
-service shutdown. The MMIO gate now freezes and runs all **61 software tests**:
-14 mouse-policy, 25 adapter, 13 backend and nine service tests. This retains the
-AArch64 build/disassembly and fixture-isolation checks. Evidence:
-`external/tmp/ventium-ps2-service-r1.c6ftZbxG`, service
-`ventium-ps2-service-r1-oct12`, invocation `60348f78ccef4ebc91033e4adb7108ad`,
-native exit zero, CPU 12, peak 32,997,376 bytes, input pins unchanged. Closure:
-`8bf15374e77c10cc33db1cb2f70cee9034b07400f6692b7b114452bdd5d69c42`.
-The socket tests use fake MMIO. The service is **not yet deployed or qualified
-through the complete hardware path**.
-
-A read-only board check at 07:17 UTC finds aarch64 Linux
-`6.12.0-g7e47ae4ab22e`, 4-KiB pages, and an administrator `/proc/iomem` listing
-whose System RAM ranges do not include `0xA0000000`. This confirms the non-RAM
-aperture prerequisite, not the actual PTE attributes, new mailbox capability or
-physical access ordering. No bitstream, register or guest state was changed.
-
-### Frozen FPGA controller profile
-
-The original wire tests used the default 8042 preprocessor configuration.
-The actual frozen FPGA profile also enables `VEN_KBC_FAST` and
-`VEN_KBD_AUTOACK`. The runner's new `--fpga-defines PATH/defines.txt` option
-pins that file, checks the controller's feature branches, and passes these two
-flags to both native Icarus compilations. Other SoC definitions are not claimed
-as exercised by this peripheral-only test. Three host tests reject missing,
-valued, duplicate, unsafe or unknown feature selections.
-
-The unchanged mailbox/wire scenario passes using the **actual memory-divide
-candidate's frozen `ps2.v`, FIFO and defines** at 3.125 and 40 MHz: 19 host
-commands / 46 delivered bytes at each clock, in **13.13 / 96.91 seconds**.
-The 14 policy tests and three intended mutation failures remain enabled.
-Independent closure checks rehash all 27 pins, inspect actual compile flags,
-count saved RX/TX lines, and verify the owner is terminal and children reaped.
-This closes a configuration-coverage gap; it does not demonstrate a newly
-repaired controller bug, physical mouse operation or end-to-end service use.
-
-Evidence: `external/tmp/ventium-ps2-mouse-policy.uuiwv3_z`, service
-`ventium-ps2-mouse-fpga-profile-oct12`, invocation
-`5cfcee8440b14430912b7cdb54ad3c2b`, native exit zero, actual CPU 12,
-26,120,192-byte peak, no OOM. Closure SHA-256:
-`67b04e8630f2567a08a4df07bdbf6b8634fa55deb2d3e0c1b68bde2521d28191`.
-Reproduce with the bounded mailbox-wire command above, adding
-`--fpga-defines` for the selected frozen export and using its matching
-`--platform-root`. No active synthesis input or board state was changed.
-
-### Combined software adapter, AXI bridge and serial controller
-
-[`run-ps2-adapter-path-gate.py`](run-ps2-adapter-path-gate.py) now connects the
-unchanged software adapter/policy and real local-socket input endpoint through
-AXI transactions to the prepared **actual management bridge, mailbox, serial
-transport and frozen 8042/FIFO**. The small
-[testbench](tb_ps2_adapter_path.sv) supplies normal guest port-64h/60h I/O and
-elapsed clock cycles; it never forces controller/FIFO/IRQ state. It extracts
-the complete management instance from the existing management regression,
-pinning both sources rather than maintaining divergent debug-port tie-offs.
-
-Both **3.125 and 40 MHz** runs pass **20 host commands / 50 delivered bytes**,
-in **17.78 / 140.54 seconds**. They exercise identification/reset, configuration,
-stream and remote motion, resend, wrap, all three buttons, and a real management
-reset followed by adapter-generation invalidation/rearm. Movement/button input
-crosses the actual Unix `SOCK_SEQPACKET` endpoint. Every returned byte traverses
-serial framing/parity, AUX status, actual IRQ12 and port 60h; completed frames
-match software-confirmed delivery counts. AXI AW/W arrivals are skewed, B/R
-responses are held under backpressure, and the callback performs same-device
-write readback. The original frozen controller flags `VEN_KBC_FAST` and
-`VEN_KBD_AUTOACK` remain enabled.
-
-An independently compiled even-parity mutation exits **1** at the native serial
-bit-9 assertion, not a compile failure/timeout. This scenario has no serial
-preemption; the earlier directed preemption tests remain separate coverage.
-The callbacks model ordered MMIO as AXI transactions: **AArch64 MMIO execution,
-the production service's wall-clock loop, processor, Windows and physical
-FPGA are not tested**. The source overlay remains unintegrated and no live
-synthesis input was edited.
-
-Evidence: `external/tmp/ventium-ps2-adapter-path.qJTeO3XE`, native owner
-`ventium-ps2-adapter-path-oct12`, invocation
-`29f9550243a04cc4a580e144a0bc0aed`. The owner closes zero, all children are
-reaped, actual affinity is CPU 12, peak memory is **24,969,216 bytes**, and
-OOM counts are zero. An independent closure check rehashes all **40 pins**,
-replays recorded command/count consistency and checks actual owner closure.
-Receipt SHA-256:
-`946e16f75e62701c733ca31d5ceaa37281907ac65dda83da37f259273a9a68ed`.
-
-Reproduce in a fresh empty external directory with the earlier one-CPU service
-profile, `MemoryMax=256M`, `RuntimeMaxSec=510`, and:
-
-```sh
-python3 -B fpga/run-ps2-adapter-path-gate.py \
-  --out FRESH_EMPTY_EXTERNAL_DIRECTORY \
-  --overlay PREPARED_MOUSE_OVERLAY \
-  --platform-root FROZEN_EXPORT/ventium/3rd-party/ao486_MiSTer/rtl \
-  --fpga-defines FROZEN_EXPORT/defines.txt
-```
-
-### October 12: source-complete integration, not hardware qualification
-
-[`freeze_ps2_mouse_rk_candidate.py`](freeze_ps2_mouse_rk_candidate.py) now
-integrates the tested overlay into a **separate 192-payload export** derived
-from the [early backing-payload candidate](BACKING_PAIR_PAYLOAD.md). It changes
-only the management bridge, PL wrapper and project source list, and adds the
-two mouse modules. Every processor/peripheral input outside those exact five
-files is byte-identical to the 190-payload parent. All 158 hardware defines,
-full P5 cache geometry, UV+fast mode and 40/100 MHz constraints are retained.
-The active synthesis input directory was not edited.
-
-Preparation rehashes all parent inputs and the combined-path test's 40 pins,
-verifies its actual native owner is closed, and matches its real 8042/FIFO
-sources and controller flags to the new export. The actual expanded project
-passes the original clock/profile checks and names each added mouse module
-exactly once. Ten host tests check exact delta admission, missing/extra/drifted
-inputs, reapplication, absent/duplicate project entries, missing RTL and the
-original half-cache rejection. The first negative-control test expected a
-later error message; it was corrected to assert the earlier native wrapper
-rejection. No acceptance check or hardware behavior was relaxed.
-
-Evidence: `external/tmp/ventium-load-read-ack.GyWDDtiI/backing-payload-mouse-source-r1`,
-manifest SHA-256
-`1c772c58f614c553eff93f3c7b7ce813b0e32dbff6bfca11623482e437d77df5`.
-`freeze-receipt.json`, `source-contract.log` and `host-tests.log` record source
-admission. Reproduce with fresh external output:
-
-```sh
-TMPDIR=/home/yukidama/external/tmp python3 -B fpga/freeze_ps2_mouse_rk_candidate.py \
-  --parent FROZEN_BACKING_PAYLOAD_EXPORT --overlay PREPARED_MOUSE_OVERLAY \
-  --proof CLOSED_ADAPTER_PATH_RUN --out FRESH_EXTERNAL_OUTPUT
-TMPDIR=/home/yukidama/external/tmp python3 -B fpga/test_freeze_ps2_mouse_rk_candidate.py \
-  --source FRESH_EXTERNAL_OUTPUT -v
-```
-
-This is **source integration only**: no complete-wrapper elaboration, new
-simulator, synthesized Fmax, native ARM MMIO, Windows or physical FPGA result
-is inherited. The manifest explicitly clears simulator/acceptance claims.
-Full integration verification and timing remain required before deployment.
-
-### Native ARM userspace compatibility, not device-MMIO qualification
-
-At 22:00 UTC, the actual RK board passes all **61 software tests** on native
-AArch64 Linux `6.12.0-g7e47ae4ab22e`, Python 3.11.2 and 4-KiB pages. The fixture
-library is cross-compiled for ARM from the unchanged C source; both it and the
-existing production library load successfully. The production library's only
-invoked function reports its build type. **Its physical opener is never called.**
-The fixture build rejects physical open and maps only ordinary temporary files.
-Thus this tests the real ARM ABI, ctypes, file-backed register accesses,
-ownership/fork behavior and local socket tests, not device memory or AXI ordering.
-In particular, the test build uses its fixture barrier, not the production
-`dsb sy` path. No bitstream, reset, clock, guest memory or guest media changes.
-
-[`prepare_ps2_arm_fixture.py`](prepare_ps2_arm_fixture.py) freezes a previously
-closed 61-test host package, compiles its ARM fixture and copies its already
-qualified production library. Only two **test setup** assertions change: their
-explicit scratch root is supplied by the board runner instead of naming the
-host's external volume. All test methods and production sources are unchanged.
-Three recipe tests cover exact scope, source drift, duplicate anchors and
-reapplication. The source-controlled preparer reproduces all **12 tested payload
-hashes** from the initial manually prepared package.
-
-[`check_ps2_arm_fixture.py`](board-tools/check_ps2_arm_fixture.py) requires an
-owned mode-0700 `/dev/shm/ventium-ps2-arm-fixture.*` leaf, native AArch64,
-explicit CPU1 affinity, exact payload hashes and separated fixture/production
-exports. It confines test scratch to that leaf, uses a 60-second child timeout,
-256-MiB address-space and 8-MiB output-file limits, and records native child
-exit/reaping. It refuses reusing output logs. The test process completes in
-**0.9784 seconds** including interpreter startup; unittest reports **0.205 s**.
-This is not a new CPU/FPGA performance measurement.
-
-Evidence:
-
-- Board: `/dev/shm/ventium-ps2-arm-fixture.nppqb9N8`, boot ID
-  `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`; SSH/test exits both zero. No checker
-  or test child remains live after closure.
-- Host: `/home/yukidama/external/tmp/ventium-ps2-arm-fixture.C0Ej5ne9`, retaining
-  the initial preparation, manifest, copied native log/closure and independent
-  `audit.py` / `audit.json`. The audit rehashes **15 remote artifacts**, verifies
-  all 12 reproduced payloads and 16 preparation source-pin entries.
-- Source-controlled preparation: `external/tmp/ventium-ps2-arm-fixture-r2.SKGgV5nO`.
-  Its manifest differs only in preparation provenance, not tested payloads.
-- Native closure SHA-256:
-  `98ab750f1258c2420d37d558a62c057960fe9e77541f3f86f2d1c188f7eb7b6a`.
-  Native unit-log SHA-256:
-  `9c39742709f3371a1dc6c094bbd5a7436a786e4acaa37dcc6772465ec63b4063`.
-
-Reprepare on the host, then copy the manifest-listed files and manifest to a
-fresh, owned board leaf matching the required prefix. Never overwrite a live
-service installation or reuse a previous result directory:
-
-```sh
-TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
-  taskset -c 12 python3 -B fpga/prepare_ps2_arm_fixture.py \
-  --source CLOSED_61_TEST_HOST_RUN --out FRESH_EMPTY_EXTERNAL_DIRECTORY
-# On the board, after checking the transferred hashes and changing into the leaf:
-TMPDIR="$PWD" PYTHONDONTWRITEBYTECODE=1 \
-  taskset -c 1 python3 -B check_ps2_arm_fixture.py
-```
-
-Physical MMIO, the service's real-device loop, the complete FPGA path and
-Windows mouse acceptance remain pending. The mouse source export remains
-separate from the current READ-OWNER timing candidate.
-
-## Still required before physical mouse acceptance
-
-1. Integrate and qualify the prepared service/input client in the actual cold
-   launch and UI procedure. Do not introduce guest-specific command recognition
-   or synthetic cursor writes. Keep the protocol/wire gates passing.
-2. Verify the prepared native MMIO backend and service on the deployed
-   platform, then exercise the physical 8042/wire/AXI path. The combined
-   simulation above establishes its software/RTL protocol, not real ARM MMIO
-   ordering, production polling behavior or a Windows UI producer.
-3. Qualify the separate source-matched mouse export with full integration
-   lint/verification, retain the 40 MHz timing requirement, and implement/deploy
-   it. Do not edit the active frozen synthesis inputs.
-4. Cold Win95 desktop and actual keyboard/mouse interaction on the deployed
-   candidate, with original guest media, captures, bitstream/source hashes,
-   measured clock and UV+fast evidence. Keyboard-only UI is not mouse coverage.
